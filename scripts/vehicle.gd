@@ -47,6 +47,11 @@ var _legs: Array = []  # [MeshInstance3D, attach point, wheel pivot]
 var _wheel_r := 0.45
 var _vis_t := 0.0
 var _track_dist := 0.0
+var _factory := []  # original [primary, secondary] colours
+var _look_yaw := 0.0
+var _look_pitch := 0.0
+var _look_idle := 0.0
+var cam_mode := 0  # 0 = chase, 1 = hood
 
 var model: Node3D
 var body_pivot: Node3D
@@ -320,9 +325,20 @@ func _process(dt: float) -> void:
 		_update_wear_visuals()
 	if engine_sfx.playing:
 		engine_sfx.pitch_scale = 0.7 + absf(speed) / max_speed * 0.6 + (0.25 if boosting else 0.0)
-	if driving or autopilot:
+	_look_idle += dt
+	if _look_idle > 1.5:
+		_look_yaw = lerpf(_look_yaw, 0.0, 1.0 - exp(-3.0 * dt))
+		_look_pitch = lerpf(_look_pitch, 0.0, 1.0 - exp(-3.0 * dt))
+	if driving and cam_mode == 1 and not autopilot:
+		# Hood camera: on the cab roof, looking where the vehicle (plus free look) points.
+		var cab := model.global_transform * Vector3(0, 2.35 if kind == "sweeper" else 2.05, -0.5)
+		camera.global_position = cab
+		var dir := Basis(Vector3.UP, heading + _look_yaw) * Basis(Vector3.RIGHT, _look_pitch - 0.12) * Vector3(0, 0, -1)
+		camera.look_at(cab + dir)
+		camera.fov = lerpf(camera.fov, 78.0 + (6.0 if boosting else 0.0), 1.0 - exp(-3.0 * dt))
+	elif driving or autopilot:
 		var dist := 8.5 + absf(speed) * 0.25
-		var want := p + Basis(Vector3.UP, heading) * Vector3(0, 3.6 + absf(speed) * 0.06, dist)
+		var want := p + Basis(Vector3.UP, heading + _look_yaw) * Vector3(0, 3.6 + absf(speed) * 0.06 + _look_pitch * 6.0, dist)
 		want.y = maxf(want.y, world.terrain.height_at(want.x, want.z) + 1.5)
 		# Spring arm: pull the camera in front of walls/buildings between it and the vehicle.
 		var pivot := p + Vector3(0, 2.2, 0)
@@ -355,6 +371,32 @@ func _update_wear_visuals() -> void:
 	if _tyre_mat:
 		_tyre_mat.albedo_color = Color(0.72, 0.72, 0.74).lerp(Color(0.36, 0.25, 0.18), 1.0 - float(cond.tyres))
 	_smoke.emitting = float(cond.motor) < 0.35 and (driving or absf(speed) > 0.5) and visible
+
+
+## Paint job: swaps the primary/secondary body colours (wear grime is applied on top).
+func apply_livery(lv: Dictionary) -> void:
+	if _factory.is_empty():
+		_factory = [_paint[0][1], _paint[1][1]]
+	var factory: bool = lv.id == "factory"
+	_paint[0][1] = _factory[0] if factory else lv.primary
+	_paint[1][1] = _factory[1] if factory else lv.secondary
+	for pm in _paint:
+		(pm[0] as StandardMaterial3D).metallic = 0.3 if factory else float(lv.metal)
+	_update_wear_visuals()
+
+
+## PUBG-style free look: move the mouse to look around; the camera recentres when you stop.
+func _unhandled_input(e: InputEvent) -> void:
+	if not driving or world.ui_open:
+		return
+	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		var s := Config.mouse_sensitivity * 0.01
+		_look_yaw = clampf(_look_yaw - e.relative.x * s, -PI * 0.95, PI * 0.95)
+		_look_pitch = clampf(_look_pitch - e.relative.y * s, -0.5, 0.6)
+		_look_idle = 0.0
+	elif e.is_action_pressed("camera_toggle"):
+		cam_mode = 1 - cam_mode
+		snap_camera()
 
 
 func set_headlights(on: bool) -> void:

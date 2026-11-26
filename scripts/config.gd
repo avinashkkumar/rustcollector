@@ -189,6 +189,10 @@ func _setup_input() -> void:
 	_key("toggle_hex", [KEY_H])
 	_key("vehicle_tool", [KEY_R])
 	_key("vehicle_empty", [KEY_Q])
+	_key("waypoint", [KEY_T])
+	_key("camera_toggle", [KEY_V])
+	_key("use_kit", [KEY_G])
+	_key("use_cell", [KEY_B])
 	if not InputMap.has_action("clean"):
 		InputMap.add_action("clean")
 		var mb := InputEventMouseButton.new()
