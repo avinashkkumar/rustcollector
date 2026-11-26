@@ -74,7 +74,8 @@ static func button(text: String, cb: Callable, min_w := 260) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.custom_minimum_size = Vector2(min_w, 44)
-	b.pressed.connect(cb)
+	if cb.is_valid():
+		b.pressed.connect(cb)
 	return b
 
 
