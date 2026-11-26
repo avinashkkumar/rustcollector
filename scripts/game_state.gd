@@ -18,8 +18,28 @@ static func rust_path() -> String:
 
 const SELL_PRICE := 25.0  # ₹ per kg of rust exported
 const DRONE_SHARE := 0.5  # drones export remotely at half price
-const HEX_BONUS := 2000  # ₹ extra for every hexagon cleaned to 90 %
+const HEX_BONUS_PER_KG := 8.0  # ₹ bonus per kg the hexagon originally held, when cleaned to 90 %
 const HEX_CLEAR := 0.9
+# Per-world difficulty, chosen when the world is created (Minecraft style).
+const DIFFICULTIES := {
+	relaxed = {name = "Relaxed", desc = "Better prices, cheaper upgrades, gentle wear, crust starts far out.",
+		price = 1.15, cost = 0.85, wear = 0.5, drain = 0.85, crust = 1.6, mastery = 0.7},
+	standard = {name = "Standard", desc = "The intended balance.",
+		price = 1.0, cost = 1.0, wear = 1.0, drain = 1.0, crust = 1.0, mastery = 1.0},
+	hard = {name = "Hard", desc = "Lower prices, dearer upgrades, faster wear and drain, crust close to base.",
+		price = 0.85, cost = 1.3, wear = 1.6, drain = 1.25, crust = 0.7, mastery = 1.4},
+}
+const DIFFICULTY_ORDER := ["relaxed", "standard", "hard"]
+# Crust: the rust gets harder the further you go from the base. Ring radii in metres (scaled by
+# the difficulty's crust factor). A tool below the needed tier only scratches it.
+const CRUST_RINGS := [140.0, 320.0, 600.0]
+const CRUST_NAMES := ["Crust I", "Crust II", "Crust III", "Crust IV"]
+const CRUST_UNDER_TIER := 0.25  # cleaning speed multiplier per missing tool tier
+const SWEEPER_TIER := 2  # the Sweeper's roller handles up to Crust III
+const DRONE_TIER := 1
+# Tool mastery: each tool levels up from the rust it cleans. Upgrades can't exceed mastery.
+const MASTERY_KG := [0.0, 120.0, 400.0, 1100.0, 2800.0, 7000.0]
+const MASTERY_BONUS := 0.05  # +5 % cleaning speed per mastery star
 const MAX_DRONES := 10
 const TOW_COST := 4000
 
@@ -32,8 +52,14 @@ const BANK_PER_PANEL := 2.0
 const PAD_CHARGE_KW := 8.0
 const CART_CHARGE_KW := 6.0
 
-const SWEEPER_COST := 55000
-const CHARGER_COST := 30000
+const SWEEPER_COST := 90000
+const CHARGER_COST := 45000
+# Machines unlock with progress: rank index from RANKS, plus hexagons cleared (by hand, early on).
+const UNLOCKS := {
+	sweeper = {rank = 2, hexes = 25}, charger = {rank = 3, hexes = 0}, drone = {rank = 4, hexes = 0},
+	tool_2 = {rank = 1, hexes = 0}, tool_3 = {rank = 2, hexes = 0}, tool_4 = {rank = 4, hexes = 0},
+	tank_3 = {rank = 1, hexes = 0}, tank_4 = {rank = 3, hexes = 0},
+}
 const SWEEPER_HOPPER := 900.0  # kg
 const SWEEPER_BATT := [{kwh = 12.0, cost = 0}, {kwh = 18.0, cost = 15000}, {kwh = 26.0, cost = 35000}, {kwh = 36.0, cost = 70000}]
 const CHARGER_BATT := 45.0
@@ -44,20 +70,20 @@ const REPAIR_COST := {
 }
 const PART_NAMES := {tyres = "Tyres", brush = "Brush roller", motor = "Drive motor"}
 # Drone work zone: hexagon rings around the base hex (1 ring = 7 hexes, 4 rings = 61).
-const DRONE_RANGE := [{rings = 1, cost = 0}, {rings = 2, cost = 25000}, {rings = 3, cost = 60000}, {rings = 4, cost = 120000}]
+const DRONE_RANGE := [{rings = 1, cost = 0}, {rings = 2, cost = 40000}, {rings = 3, cost = 90000}, {rings = 4, cost = 180000}]
 
 const TOOLS := [
 	{name = "Scrub Brush", desc = "Hand brush. Slow, but it's a start.", radius = 0.45, rate = 2.2, reach = 3.4, cost = 0},
-	{name = "Push Broom", desc = "Wide head, long handle.", radius = 0.8, rate = 2.6, reach = 3.9, cost = 3000},
-	{name = "Air Blower", desc = "Blasts rust loose over a wide area.", radius = 1.3, rate = 3.0, reach = 4.6, cost = 11000},
-	{name = "Vacuum Pump", desc = "Backpack suction pump. Fast and far.", radius = 2.0, rate = 3.8, reach = 5.5, cost = 35000},
-	{name = "Ion Sweeper", desc = "Electrostatic field lifts everything.", radius = 3.0, rate = 5.0, reach = 6.5, cost = 100000},
+	{name = "Push Broom", desc = "Wide head, long handle.", radius = 0.8, rate = 2.6, reach = 3.9, cost = 4000},
+	{name = "Air Blower", desc = "Blasts rust loose over a wide area.", radius = 1.3, rate = 3.0, reach = 4.6, cost = 30000},
+	{name = "Vacuum Pump", desc = "Backpack suction pump. Fast and far.", radius = 2.0, rate = 3.8, reach = 5.5, cost = 95000},
+	{name = "Ion Sweeper", desc = "Electrostatic field lifts everything.", radius = 3.0, rate = 5.0, reach = 6.5, cost = 300000},
 ]
 # Upgrade tracks that apply on top of whichever tool you hold.
 const TOOL_MODS := {
-	power = {name = "Motor power", desc = "+15% cleaning speed per level", per = 0.15, max = 6, cost = 900},
-	width = {name = "Wider head", desc = "+12% cleaning radius per level", per = 0.12, max = 6, cost = 1100},
-	reach = {name = "Extension arm", desc = "+10% reach per level", per = 0.10, max = 4, cost = 700},
+	power = {name = "Motor power", desc = "+10% cleaning speed per level", per = 0.10, max = 5, cost = 1200},
+	width = {name = "Wider head", desc = "+6% cleaning radius per level", per = 0.06, max = 5, cost = 1600},
+	reach = {name = "Extension arm", desc = "+8% reach per level", per = 0.08, max = 4, cost = 900},
 }
 # Things buried under the rust. Found at random while cleaning; each pays once.
 const RELICS := [
@@ -89,8 +115,8 @@ const LIVERIES := [
 const SOL_SECONDS := 960.0  # one Martian day lasts 16 real minutes
 
 const TANKS := [
-	{cap = 25.0, cost = 0}, {cap = 60.0, cost = 2000}, {cap = 140.0, cost = 8000},
-	{cap = 300.0, cost = 25000}, {cap = 650.0, cost = 75000},
+	{cap = 25.0, cost = 0}, {cap = 45.0, cost = 3000}, {cap = 80.0, cost = 15000},
+	{cap = 140.0, cost = 45000}, {cap = 250.0, cost = 120000},
 ]
 const BOOTS := [{mult = 1.0, cost = 0}, {mult = 1.15, cost = 4000}, {mult = 1.3, cost = 14000}, {mult = 1.5, cost = 40000}]
 
@@ -113,6 +139,11 @@ var charger_energy := CHARGER_BATT
 var vehicles := {}  # name -> [x, y, z, heading] last parked position
 var wear := {sweeper = {tyres = 1.0, brush = 1.0, motor = 1.0}, charger = {tyres = 1.0, motor = 1.0}}
 var repairs_done := 0
+var difficulty := "standard"  # from the world's meta.json, not the save
+var cart_lvl := -1  # -1 = no handcart yet
+var cart := {pos = [4.0, 0.0, 3.0], yaw = 0.0, kg = 0.0}
+var sacks: Array = []  # [x, y, z, kg] waiting for the hauler
+var mastery_kg := {}  # tool index (as text) -> kg cleaned with it
 var repair_kits := 0
 var battery_cells := 0
 var pods_opened := 0
@@ -136,10 +167,67 @@ var player_yaw := 0.0
 var play_time := 0.0
 
 
+func diff() -> Dictionary:
+	return DIFFICULTIES.get(difficulty, DIFFICULTIES.standard)
+
+
+## 0..3: how hard the rust is at this spot (rings around the base).
+func crust_at(x: float, z: float) -> int:
+	var d := Vector2(x, z).length() / float(diff().crust)
+	var h := 0
+	for r in CRUST_RINGS:
+		if d > r:
+			h += 1
+	return h
+
+
+## Cleaning speed multiplier for a tool tier on crust level h.
+static func crust_factor(tier: int, h: int) -> float:
+	return 1.0 if tier >= h else pow(CRUST_UNDER_TIER, h - tier)
+
+
+func mastery_level(t := -1) -> int:
+	var kg: float = mastery_kg.get(str(tool_lvl if t < 0 else t), 0.0)
+	var lvl := 0
+	for i in MASTERY_KG.size():
+		if kg >= MASTERY_KG[i] * float(diff().mastery) * (1.0 + 0.5 * (tool_lvl if t < 0 else t)):
+			lvl = i
+	return lvl
+
+
+## kg still needed for the next mastery star (0 at max).
+func mastery_next_kg() -> float:
+	var lvl := mastery_level()
+	if lvl >= MASTERY_KG.size() - 1:
+		return 0.0
+	var need: float = MASTERY_KG[lvl + 1] * float(diff().mastery) * (1.0 + 0.5 * tool_lvl)
+	return maxf(need - float(mastery_kg.get(str(tool_lvl), 0.0)), 0.0)
+
+
+## Hexagon bonus: scales with how much rust it held and how hard that rust was.
+func hex_bonus(pristine_kg: float, crust: int) -> int:
+	var v := maxf(pristine_kg, 150.0) * HEX_BONUS_PER_KG * (1.0 + 0.6 * crust) * float(diff().price)
+	return int(round(v / 100.0)) * 100
+
+
+## "" if unlocked, otherwise what is still needed, e.g. "Rank Grit Grinder · 3 more hexagons".
+func lock_reason(key: String) -> String:
+	if not UNLOCKS.has(key):
+		return ""
+	var u: Dictionary = UNLOCKS[key]
+	var need := PackedStringArray()
+	if rank_index() < int(u.rank):
+		need.append("rank %s" % RANKS[u.rank].name)
+	var hx := int(u.hexes) - hexes_cleared.size()
+	if hx > 0:
+		need.append("%d more hexagon%s cleared" % [hx, "" if hx == 1 else "s"])
+	return " · ".join(need)
+
+
 func tool() -> Dictionary:
 	var t: Dictionary = TOOLS[tool_lvl].duplicate()
 	t.radius = float(t.radius) * (1.0 + mods.width * TOOL_MODS.width.per)
-	t.rate = float(t.rate) * (1.0 + mods.power * TOOL_MODS.power.per)
+	t.rate = float(t.rate) * (1.0 + mods.power * TOOL_MODS.power.per) * (1.0 + MASTERY_BONUS * mastery_level())
 	t.reach = float(t.reach) * (1.0 + mods.reach * TOOL_MODS.reach.per)
 	return t
 
@@ -147,7 +235,20 @@ func tool() -> Dictionary:
 func mod_cost(m: String) -> int:
 	var lvl: int = mods[m]
 	var base: float = TOOL_MODS[m].cost
-	return int(round(base * pow(1.65, lvl) * (1.0 + tool_lvl * 0.6) / 100.0)) * 100
+	return int(round(base * pow(1.75, lvl) * (1.0 + tool_lvl * 0.6) / 100.0)) * 100
+
+
+const CARTS := [{cap = 120.0, cost = 6000}, {cap = 220.0, cost = 25000}, {cap = 400.0, cost = 70000}]
+const HAUL_FEE := {relaxed = 0.10, standard = 0.25, hard = 0.40}
+const HAUL_INTERVAL := 120.0
+
+
+func cart_capacity() -> float:
+	return CARTS[maxi(cart_lvl, 0)].cap
+
+
+func haul_fee() -> float:
+	return HAUL_FEE.get(difficulty, 0.25)
 
 
 func capacity() -> float:
@@ -163,7 +264,7 @@ func sweeper_battery() -> float:
 
 
 func drone_cost() -> int:
-	return 20000 + drones * 11000
+	return 40000 + drones * 20000
 
 
 func panel_cost() -> int:
@@ -181,7 +282,7 @@ func gen_kw() -> float:
 ## The off-world rust price drifts slowly between roughly ₹19 and ₹32 per kg; ranks add a bonus.
 func price_now() -> float:
 	var t := play_time / 240.0
-	return SELL_PRICE * (1.0 + 0.16 * sin(t * 0.9) + 0.08 * sin(t * 2.3 + 1.7)) * (1.0 + RANK_BONUS * rank_index())
+	return SELL_PRICE * (1.0 + 0.16 * sin(t * 0.9) + 0.08 * sin(t * 2.3 + 1.7)) * (1.0 + RANK_BONUS * rank_index()) * float(diff().price)
 
 
 func rank_index() -> int:
@@ -243,7 +344,8 @@ func to_dict() -> Dictionary:
 		total_sold = total_sold, hexes_cleared = hexes_cleared, drone_range = drone_range,
 		collected = collected, earned = earned, missions_done = missions_done, story_seen = story_seen,
 		relics_found = relics_found, wear = wear, repairs_done = repairs_done, repair_kits = repair_kits,
-		battery_cells = battery_cells, pods_opened = pods_opened, liveries = liveries, livery = livery,
+		battery_cells = battery_cells, pods_opened = pods_opened, mastery_kg = mastery_kg,
+		cart_lvl = cart_lvl, cart = cart, sacks = sacks, liveries = liveries, livery = livery,
 		sol_start = sol_start, sol_kg = sol_kg, dig_meter = dig_meter, next_relic_kg = next_relic_kg, time_of_day = time_of_day, sol = sol,
 		player_pos = [player_pos.x, player_pos.y, player_pos.z], player_yaw = player_yaw, play_time = play_time,
 	}
@@ -280,6 +382,10 @@ func from_dict(d: Dictionary) -> void:
 	repair_kits = int(d.get("repair_kits", 0))
 	battery_cells = int(d.get("battery_cells", 0))
 	pods_opened = int(d.get("pods_opened", 0))
+	mastery_kg = d.get("mastery_kg", {})
+	cart_lvl = int(d.get("cart_lvl", -1))
+	cart = d.get("cart", cart)
+	sacks = d.get("sacks", [])
 	var lv: Dictionary = d.get("liveries", {})
 	var la: Dictionary = d.get("livery", {})
 	for kind in liveries:

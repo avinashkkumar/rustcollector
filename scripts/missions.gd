@@ -7,21 +7,22 @@ const LIST := [
 	{id = "first_rust", title = "First scrapings", desc = "Collect 10 kg of rust.", reward = 500},
 	{id = "first_export", title = "Off-world shipment", desc = "Export rust at the depot.", reward = 500},
 	{id = "broom", title = "A proper tool", desc = "Buy the Push Broom at the base terminal.", reward = 1000},
-	{id = "mod", title = "Tinkerer", desc = "Buy any tool upgrade (power, width or reach).", reward = 1500},
+	{id = "mod", title = "Tinkerer", desc = "Earn a mastery star with your tool, then buy an upgrade (power, width or reach).", reward = 1500},
 	{id = "first_hex", title = "Hex by hex", desc = "Clean one hexagon to 90%.", reward = 2000},
-	{id = "panel1", title = "First light", desc = "Buy your first solar panel at the terminal.", reward = 1500},
-	{id = "panels4", title = "Power the base", desc = "Own 4 solar panels.", reward = 3000},
 	{id = "tank", title = "Bigger loads", desc = "Upgrade your rust tank.", reward = 3000},
-	{id = "sweeper", title = "Wheels on Mars", desc = "Buy the Sweeper vehicle.", reward = 6000},
-	{id = "hex5", title = "Clearing the plain", desc = "Clean 5 hexagons.", reward = 8000},
-	{id = "charger", title = "Lifeline", desc = "Buy the Charger cart, so nobody gets stranded.", reward = 6000},
-	{id = "repair", title = "Grease monkey", desc = "Repair a worn vehicle part at the garage (base terminal, Workshop).", reward = 4000},
+	{id = "panel1", title = "First light", desc = "Buy your first solar panel at the terminal.", reward = 1500},
 	{id = "pod", title = "Special delivery", desc = "Open a supply pod (they land somewhere on the plain; follow the beacon).", reward = 3000},
+	{id = "hex5", title = "Clearing the plain", desc = "Clean 5 hexagons.", reward = 8000},
+	{id = "panels4", title = "Power the base", desc = "Own 4 solar panels.", reward = 3000},
+	{id = "hex25", title = "Groundwork", desc = "Clean 25 hexagons by hand: the Sweeper unlocks after that.", reward = 30000},
+	{id = "sweeper", title = "Wheels on Mars", desc = "Reach rank Grit Grinder and clear 25 hexagons, then buy the Sweeper.", reward = 6000},
+	{id = "repair", title = "Grease monkey", desc = "Repair a worn vehicle part at the garage (base terminal, Workshop).", reward = 4000},
+	{id = "charger", title = "Lifeline", desc = "Buy the Charger cart, so nobody gets stranded.", reward = 6000},
 	{id = "drones2", title = "Automation", desc = "Deploy 2 cleaning drones.", reward = 10000},
 	{id = "export5t", title = "Five tonnes", desc = "Export 5,000 kg of rust in total.", reward = 20000},
 	{id = "panels15", title = "Solar farm", desc = "Own 15 solar panels.", reward = 25000},
 	{id = "vacuum", title = "Heavy suction", desc = "Buy the Vacuum Pump.", reward = 30000},
-	{id = "hex25", title = "Red to brown", desc = "Clean 25 hexagons.", reward = 60000},
+	{id = "hex60", title = "Red to brown", desc = "Clean 60 hexagons.", reward = 80000},
 	{id = "lakh10", title = "Rust tycoon", desc = "Earn ₹10,00,000 in total.", reward = 100000},
 ]
 
@@ -71,6 +72,8 @@ func progress(s: GameState, id: String) -> float:
 			return 1.0 if s.tool_lvl >= 3 else 0.0
 		"hex25":
 			return s.hexes_cleared.size() / 25.0
+		"hex60":
+			return s.hexes_cleared.size() / 60.0
 		"lakh10":
 			return s.earned / 1000000.0
 	return 0.0
