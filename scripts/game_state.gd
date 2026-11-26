@@ -71,7 +71,7 @@ const RANK_BONUS := 0.03
 # Paint jobs for vehicles (cosmetic). primary/secondary replace the body colours.
 const LIVERIES := [
 	{id = "factory", name = "Factory", cost = 0},
-	{id = "saffron", name = "Saffron Strike", cost = 15000, primary = Color(1.0, 0.58, 0.1), secondary = Color(0.98, 0.97, 0.93), metal = 0.2},
+	{id = "saffron", name = "Saffron Strike", cost = 15000, primary = Color(1.0, 0.6, 0.12), secondary = Color(0.07, 0.5, 0.2), metal = 0.2},
 	{id = "nightops", name = "Night Ops", cost = 20000, primary = Color(0.13, 0.14, 0.16), secondary = Color(0.3, 0.32, 0.35), metal = 0.4},
 	{id = "tiger", name = "Desert Tiger", cost = 25000, primary = Color(0.78, 0.62, 0.38), secondary = Color(0.36, 0.26, 0.16), metal = 0.1},
 	{id = "neon", name = "Neon Pulse", cost = 40000, primary = Color(0.32, 0.12, 0.6), secondary = Color(0.1, 0.85, 0.8), metal = 0.3},
