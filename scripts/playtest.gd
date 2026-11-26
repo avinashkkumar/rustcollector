@@ -25,6 +25,7 @@ func run() -> void:
 	await _speed_flow()
 	await _depot_drive_flow()
 	await _sack_flow()
+	await _sleep_flow()
 	await _save_flow()
 	await _worlds_flow()
 	await _menu_flow()
@@ -58,6 +59,16 @@ func _press(action: String) -> void:
 	r.action = action
 	r.pressed = false
 	Input.parse_input_event(r)
+	await _frames(2)
+	await _finish_job()
+
+
+## Unloading takes a few seconds now: wait for any job the press started (up to 15 s).
+func _finish_job() -> void:
+	var t := 0.0
+	while world and is_instance_valid(world) and world.busy() and t < 15.0:
+		await get_tree().process_frame
+		t += get_process_delta_time()
 	await _frames(2)
 
 
@@ -795,6 +806,7 @@ func _speed_flow() -> void:
 		v.cond[k] = 1.0
 	_put_vehicle(v, Vector3(80, 0, -80), Vector3(80, 0, -400))
 	await _enter(v)
+	v.tool_on = false  # getting in switches the brush on; measure driving alone
 	check(is_equal_approx(s.drive_limit, 0.6), "new worlds start at a 60%% limit (%d km/h)" % roundi(v.top_speed() * 0.6 * 3.6))
 	await _wheel(false, 10)
 	check(is_equal_approx(s.drive_limit, 0.2), "scrolling down bottoms out at 20%% (%.1f)" % s.drive_limit)
@@ -812,6 +824,27 @@ func _speed_flow() -> void:
 	var eased := absf(v.speed) * 3.6
 	Input.action_release("move_forward")
 	check(eased <= v.top_speed() * 0.4 * 3.6 + 0.5, "lowering the limit at speed slows you to it (%.1f km/h)" % eased)
+	# Battery per kilometre: slower is cheaper.
+	var per_km := {}
+	for lim in [0.3, 1.0]:
+		s.drive_limit = lim
+		v.energy = v.battery
+		await _top_kmh(v, 6.0)  # get up to speed
+		Input.action_press("move_forward")
+		var e0 := v.energy
+		var p0 := v.global_position
+		await get_tree().create_timer(5.0).timeout
+		var km := Vector2(v.global_position.x - p0.x, v.global_position.z - p0.z).length() / 1000.0
+		Input.action_release("move_forward")
+		per_km[lim] = (e0 - v.energy) / maxf(km, 0.0001)
+	check(per_km[0.3] < per_km[1.0] * 0.6, "at 30%% the Sweeper uses %.2f kWh/km, flat out %.2f" % [per_km[0.3], per_km[1.0]])
+	s.drive_limit = 0.4
+	await _frames(3)
+	var r40 := world.hud.batt_lbl.text
+	s.drive_limit = 1.0
+	await _frames(3)
+	check(v.range_at(v.top_speed() * 0.4 * 3.6) > v.range_at(v.top_speed() * 3.6) * 1.5, "HUD range grows when you scroll the limit down (%s  vs  %s)" % [r40, world.hud.batt_lbl.text])
+	v.speed = 0.0
 	s.drive_limit = 0.6
 	await _press("interact")
 	await _frames(10)
@@ -844,6 +877,10 @@ func _sack_flow() -> void:
 	v.tool_on = true
 	var before := s.hopper
 	await _drive_to(v, sack_pos, 0.5, 8.0)
+	for i in 60:
+		if s.sacks.is_empty():
+			break
+		await get_tree().create_timer(0.1).timeout
 	check(s.sacks.is_empty(), "driving over the sack with the brush on scoops it up")
 	check(s.hopper - before >= 300.0, "hopper got the full 300 kg back (+%.0f kg)" % (s.hopper - before))
 	v.tool_on = false
@@ -853,8 +890,26 @@ func _sack_flow() -> void:
 	# On foot: drop the tank, pick it straight back up with E.
 	await _stand_near(spot + Vector3(12, 0, 0), Vector3.ZERO, spot + Vector3(12, 0, -10))
 	s.tank = 20.0
+	# Unloading takes time, and walking off cancels it.
+	var e := InputEventAction.new()
+	e.action = "vehicle_empty"
+	e.pressed = true
+	Input.parse_input_event(e)
+	await _frames(3)
+	e = e.duplicate()
+	e.pressed = false
+	Input.parse_input_event(e)
+	await get_tree().create_timer(0.5).timeout
+	check(world.busy() and s.tank == 20.0 and s.sacks.is_empty(), "filling a sack takes time (%.1f s for 20 kg)" % World.task_time("tank", 20.0))
+	check(world.hud.prompt_lbl.text.contains("%"), "progress shows in the prompt (%s)" % world.hud.prompt_lbl.text)
+	await _shot("unload_progress")
+	world.player.global_position += Vector3(1.5, 0, 0)
+	await _frames(3)
+	check(not world.busy() and s.tank == 20.0 and s.sacks.is_empty(), "walking away cancels it and keeps the rust in the tank")
+	await _stand_near(spot + Vector3(12, 0, 0), Vector3.ZERO, spot + Vector3(12, 0, -10))
+	var t0 := Time.get_ticks_msec()
 	await _press("vehicle_empty")
-	check(s.tank == 0.0 and s.sacks.size() == 1, "Q on foot drops a 20 kg sack")
+	check(s.tank == 0.0 and s.sacks.size() == 1, "Q on foot drops a 20 kg sack (after %.1f s)" % ((Time.get_ticks_msec() - t0) / 1000.0))
 	await _frames(3)
 	check(world.hud.prompt_lbl.text.contains("[E] Pick up the 20 kg rust sack"), "pick-up prompt (%s)" % world.hud.prompt_lbl.text)
 	await _press("interact")
@@ -880,3 +935,54 @@ func _sack_flow() -> void:
 	await _shot("sack_into_cart")
 	world.cart.empty()
 	world.cart.place(Vector3(World.DEPOT.x - 4.0, 0, World.DEPOT.z + 4.0), 0.0)
+
+
+func _sleep_flow() -> void:
+	print("[sleeping in the bunk]")
+	var s := world.state
+	var v := world.sweeper
+	s.time_of_day = 0.5  # noon
+	await _stand_near(World.BED, Vector3(0, 0, 1.6), World.BED)
+	await _frames(3)
+	check(world.hud.prompt_lbl.text.contains("once it is dark"), "no sleeping at noon (%s)" % world.hud.prompt_lbl.text)
+	await _press("interact")
+	check(not world.sleeping and is_equal_approx(s.time_of_day, 0.5) or s.time_of_day < 0.52, "E at noon does nothing")
+	# Night, but broke.
+	s.time_of_day = 0.85
+	s.credits = 100.0
+	await _frames(3)
+	check(world.hud.prompt_lbl.text.contains("[E] Sleep until 06:30"), "bunk offers sleep at night (%s)" % world.hud.prompt_lbl.text)
+	await _press("interact")
+	await _frames(5)
+	check(not world.sleeping and s.time_of_day > 0.8 and s.credits == 100.0, "can't sleep without the money")
+	# Night with money, the Sweeper plugged in and the base battery full.
+	s.credits = 20000.0
+	s.sweeper_owned = true
+	world._set_vehicle_present(v, true)
+	v.global_position = Vector3(World.BAYS[0].x, world.terrain.height_at(World.BAYS[0].x, World.BAYS[0].z) + 0.3, World.BAYS[0].z)
+	v.energy = 2.0
+	world.plugged[v] = 0
+	s.bank = s.bank_cap()
+	s.sacks.clear()  # so the hauler has nothing to pay out overnight
+	for n in world._sack_nodes:
+		n.queue_free()
+	world._sack_nodes.clear()
+	var sol0 := s.sol
+	await _stand_near(World.BED, Vector3(0, 0, 1.6), World.BED)
+	await _press("interact")
+	await _frames(5)
+	check(world.sleeping, "E at night puts you to sleep")
+	await get_tree().create_timer(0.8).timeout
+	await _shot("sleeping")
+	var t := 0.0
+	while world.sleeping and t < 10.0:
+		await get_tree().create_timer(0.1).timeout
+		t += 0.1
+	check(not world.sleeping, "you wake up again (%.1f s)" % t)
+	check(absf(s.time_of_day - 0.27) < 0.01, "it is morning, %s" % World.clock(s.time_of_day))
+	check(s.sol == sol0 + 1, "a new sol began (Sol %d -> %d)" % [sol0, s.sol])
+	check(is_equal_approx(s.credits, 20000.0 - world.sleep_cost()), "the night cost %s" % GameState.inr(world.sleep_cost()))
+	check(v.energy > 10.0, "the plugged-in Sweeper charged overnight (2 -> %.1f kWh)" % v.energy)
+	await _frames(10)
+	await _shot("good_morning")
+	world.plugged.erase(v)
