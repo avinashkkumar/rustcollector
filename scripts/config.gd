@@ -11,7 +11,7 @@ var render_scale := 0.0  # 0 = use preset default
 var upscaler := "auto"  # auto | off | fsr1 | fsr2
 var vsync := true
 var fps_cap := 0
-var fullscreen := false
+var fullscreen := true  # games start fullscreen; F11 or Alt+Enter toggles it any time
 var mouse_sensitivity := 0.12
 var master_volume := 0.8
 var show_fps := false
@@ -136,6 +136,15 @@ func apply_display() -> void:
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(master_volume, 0.0001)))
 
 
+## F11 or Alt+Enter: toggle fullscreen from anywhere (menu, game, benchmark).
+func _input(e: InputEvent) -> void:
+	var k := e as InputEventKey
+	if k and k.pressed and not k.echo and (k.keycode == KEY_F11 or (k.keycode == KEY_ENTER and k.alt_pressed)):
+		fullscreen = DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_FULLSCREEN
+		changed()
+		get_viewport().set_input_as_handled()
+
+
 func changed() -> void:
 	save_settings()
 	apply_display()
@@ -192,6 +201,7 @@ func _setup_input() -> void:
 	_key("vehicle_empty", [KEY_Q])
 	_key("waypoint", [KEY_T])
 	_key("torch", [KEY_L])
+	_key("place_panel", [KEY_P])
 	_key("camera_toggle", [KEY_V])
 	_key("use_kit", [KEY_G])
 	_key("use_cell", [KEY_B])

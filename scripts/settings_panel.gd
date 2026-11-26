@@ -58,7 +58,7 @@ func _ready() -> void:
 	_row(grid, "Frame rate cap", cap)
 
 	_row(grid, "VSync", _check(Config.vsync, func(on: bool) -> void: Config.vsync = on; Config.changed()))
-	_row(grid, "Fullscreen", _check(Config.fullscreen, func(on: bool) -> void: Config.fullscreen = on; Config.changed()))
+	_row(grid, "Fullscreen  (F11)", _check(Config.fullscreen, func(on: bool) -> void: Config.fullscreen = on; Config.changed()))
 	_row(grid, "Hexagon grid (H)", _check(Config.hex_overlay, func(on: bool) -> void: Config.hex_overlay = on; Config.changed()))
 	_row(grid, "Show FPS (F3)", _check(Config.show_fps, func(on: bool) -> void: Config.show_fps = on; Config.changed()))
 	_row(grid, "Mouse sensitivity", _slider(0.03, 0.4, Config.mouse_sensitivity, func(v: float) -> void: Config.mouse_sensitivity = v; Config.save_settings()))
