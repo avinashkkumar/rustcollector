@@ -123,7 +123,8 @@ func _physics_process(dt: float) -> void:
 	var dir := (transform.basis * Vector3(inp.x, 0, inp.y))
 	dir.y = 0
 	dir = dir.normalized()
-	var spd := (SPRINT if Input.is_action_pressed("sprint") else WALK) * world.state.boots_mult()
+	var pushing_cart: bool = world.cart != null and world.cart.pushing
+	var spd := (WALK * 0.72 if pushing_cart else (SPRINT if Input.is_action_pressed("sprint") else WALK)) * world.state.boots_mult()
 	if cleaning:
 		spd *= 0.8
 	var k := 1.0 - exp(-(10.0 if is_on_floor() else 2.0) * dt)
@@ -158,7 +159,7 @@ func _process(dt: float) -> void:
 		var to := from - camera.global_transform.basis.z * float(t.reach)
 		var q := PhysicsRayQueryParameters3D.create(from, to, 1 | 4)
 		var hit := get_world_3d().direct_space_state.intersect_ray(q)
-		if hit and hit.collider.collision_layer == 1:
+		if hit and hit.collider.collision_layer == 1 and not (world.cart and world.cart.pushing):
 			aim_valid = world.rust.value_at(hit.position.x, hit.position.z) > 0
 			if Input.is_action_pressed("clean"):
 				cleaning = world.player_clean(hit.position, t, dt)
