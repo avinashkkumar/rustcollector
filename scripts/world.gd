@@ -16,6 +16,11 @@ const SOLAR_ORIGIN := Vector3(-18, 0, -25)
 var mode := "play"
 var seed_value := 4242
 var world_name := ""
+var difficulty := "standard"
+var _hex_half := {}  # hexagons we already announced as half clean (this session)
+var cart: Handcart
+var _sack_nodes: Array[Node3D] = []
+var _haul_t := GameState.HAUL_INTERVAL
 var load_save := false
 var params: Dictionary
 var terrain: Terrain
@@ -67,6 +72,8 @@ func _ready() -> void:
 	params = Config.preset_params(Config.resolved_preset())
 	gravity = ProjectSettings.get_setting("physics/3d/default_gravity", 3.72)
 	_build_environment()
+	state.difficulty = difficulty
+	RenderingServer.global_shader_parameter_set("crust_scale", float(state.diff().crust) if mode == "play" else 1.0)
 	rust = RustField.new()
 	rust.setup(seed_value)
 	if mode == "play" and load_save:
@@ -154,6 +161,10 @@ func _start_play() -> void:
 		spawn_drone(i)
 	if state.sol_start.is_empty():
 		state.start_sol_report()
+	if state.cart_lvl >= 0:
+		_spawn_cart()
+	for sk in state.sacks:
+		_sack_nodes.append(_make_sack(Vector3(sk[0], sk[1], sk[2]), float(sk[3])))
 	_last_rank = state.rank_index()
 	for v in [sweeper, charger]:
 		apply_livery(v)
@@ -569,7 +580,7 @@ func is_tethered(v: Vehicle) -> bool:
 # ---------------------------------------------------------------- audio
 
 func _setup_audio() -> void:
-	for n in ["impactMetal_002", "computerNoise_000", "computerNoise_002", "doorOpen_001", "laserSmall_000", "forceField_001"]:
+	for n in ["impactMetal_002", "computerNoise_000", "computerNoise_002", "doorOpen_001", "laserSmall_000", "forceField_001", "thrusterFire_000"]:
 		var p := AudioStreamPlayer.new()
 		p.stream = load("res://assets/sfx/%s.ogg" % n)
 		p.volume_db = -8.0
@@ -593,11 +604,24 @@ func sfx(n: String) -> void:
 func player_clean(pos: Vector3, tool: Dictionary, dt: float) -> bool:
 	var free := state.capacity() - state.tank
 	if free <= 0.01:
-		_warn("Rust tank full! Export it at the depot.")
+		_warn("Rust tank full! Export it at the depot, tip it into your handcart (Q), or Q to drop a sack for the hauler.")
 		return false
-	var kg := rust.paint(pos, tool.radius, float(tool.rate) * dt)
+	var h := state.crust_at(pos.x, pos.z)
+	var cf := GameState.crust_factor(state.tool_lvl, h)
+	if cf < 1.0 and mode == "play":
+		_warn("%s: too hard for the %s (cleaning at %d%%). Needs the %s or better." % [
+			GameState.CRUST_NAMES[h], tool.name, roundi(cf * 100.0), GameState.TOOLS[h].name])
+	var kg := rust.paint(pos, tool.radius, float(tool.rate) * dt * cf)
 	if kg <= 0.0:
 		return false
+	var lvl0 := state.mastery_level()
+	var key := str(state.tool_lvl)
+	state.mastery_kg[key] = float(state.mastery_kg.get(key, 0.0)) + kg
+	if state.mastery_level() > lvl0 and mode == "play":
+		var lv := state.mastery_level()
+		hud.toast("%s mastery %s  ·  +%d%% speed  ·  upgrades up to level %d unlocked" % [
+			tool.name, "★".repeat(lv), roundi(lv * GameState.MASTERY_BONUS * 100.0), lv], 5.0, Color(1.0, 0.85, 0.35))
+		sfx("forceField_001")
 	state.tank = minf(state.tank + kg, state.capacity())
 	state.collected += kg
 	state.sol_kg.you += kg
@@ -612,7 +636,10 @@ func vehicle_clean(_v: Vehicle, pos: Vector3, radius: float, strength: float) ->
 	if mode == "play" and state.hopper >= GameState.SWEEPER_HOPPER:
 		_warn("Sweeper hopper full! Press Q at the export depot, or Q anywhere to dump it.")
 		return
-	var kg := rust.paint(pos, radius, strength)
+	var cf := GameState.crust_factor(GameState.SWEEPER_TIER, state.crust_at(pos.x, pos.z))
+	if cf < 1.0 and mode == "play":
+		_warn("Crust IV is too hard for the Sweeper's roller. Clean it on foot with a top-tier tool.")
+	var kg := rust.paint(pos, radius, strength * cf)
 	if kg > 0.0:
 		state.hopper = minf(state.hopper + kg, GameState.SWEEPER_HOPPER)
 		state.collected += kg
@@ -624,7 +651,7 @@ func vehicle_clean(_v: Vehicle, pos: Vector3, radius: float, strength: float) ->
 
 
 func drone_clean(pos: Vector3, radius: float, strength: float) -> bool:
-	var kg := rust.paint(pos, radius, strength)
+	var kg := rust.paint(pos, radius, strength * GameState.crust_factor(GameState.DRONE_TIER, state.crust_at(pos.x, pos.z)))
 	if kg > 0.0:
 		var c := kg * state.price_now() * GameState.DRONE_SHARE
 		state.credits += c
@@ -751,15 +778,138 @@ func _poll_hexes() -> void:
 	for k in rust.touched_hexes:
 		var c := rust.hex_clean(k)
 		hex_cache[k] = c
-		if mode == "play" and c >= GameState.HEX_CLEAR:
-			var hn := RustField.hex_name(k)
-			if not state.hexes_cleared.has(hn):
-				state.hexes_cleared.append(hn)
-				state.credits += GameState.HEX_BONUS
-				state.earned += GameState.HEX_BONUS
-				hud.toast("Hexagon %s cleared! Bonus +%s" % [hn, GameState.inr(GameState.HEX_BONUS)], 4.0)
-				sfx("laserSmall_000")
+		if mode != "play":
+			continue
+		var hn := RustField.hex_name(k)
+		if state.hexes_cleared.has(hn) or rust.hex_pristine_kg(k) < 40.0:
+			continue  # already paid, or nothing much there (the landing pad)
+		var bonus := hex_bonus(k)
+		if c >= GameState.HEX_CLEAR:
+			state.hexes_cleared.append(hn)
+			state.credits += bonus
+			state.earned += bonus
+			hud.toast("HEXAGON %s CLEARED  ·  bonus +%s" % [hn, GameState.inr(bonus)], 5.0, Color(1.0, 0.85, 0.35))
+			sfx("laserSmall_000")
+		elif c >= 0.5 and not _hex_half.has(k):
+			_hex_half[k] = true
+			hud.toast("Hexagon %s is half clean  ·  %s bonus at 90%%" % [hn, GameState.inr(bonus)], 3.5)
 	rust.touched_hexes.clear()
+
+
+# ---------------------------------------------------------------- handcart, sacks and the hauler
+
+func _spawn_cart() -> void:
+	cart = Handcart.new()
+	cart.world = self
+	add_child(cart)
+	var cp: Array = state.cart.pos
+	cart.place(Vector3(cp[0], cp[1], cp[2]), float(state.cart.yaw))
+	cart.load_kg = float(state.cart.kg)
+	cart._update_fill()
+
+
+## kg in the handcart if it is parked (or pushed) close enough to the depot to export.
+func _cart_at_depot() -> float:
+	if cart and cart.load_kg > 0.0 and _flat_dist(cart.global_position, DEPOT) < 9.0:
+		return cart.load_kg
+	return 0.0
+
+
+## Q on foot: tip the tank into the handcart if it is close, otherwise drop a sack for the hauler.
+func unload_tank() -> void:
+	if state.tank < 0.5:
+		_warn("Your rust tank is empty.")
+		return
+	if cart and _flat_dist(player.global_position, cart.global_position) < 3.2:
+		var put := cart.add(state.tank)
+		state.tank -= put
+		if put <= 0.0:
+			hud.toast("The handcart is full. Push it to the export depot.", 2.5)
+		else:
+			hud.toast("Tipped %.0f kg into the handcart (%.0f / %.0f kg)." % [put, cart.load_kg, cart.capacity()], 2.0)
+			sfx("impactMetal_002")
+		return
+	if _flat_dist(player.global_position, DEPOT) < 6.5:
+		return  # at the depot E exports at full price
+	var p := player.global_position - Vector3(sin(player.yaw), 0, cos(player.yaw)) * 0.9
+	p.y = terrain.height_at(p.x, p.z)
+	state.sacks.append([p.x, p.y, p.z, state.tank])
+	_sack_nodes.append(_make_sack(p, state.tank))
+	hud.toast("Dropped a %.0f kg rust sack. The hauler collects sacks every %d min (%d%% haulage fee)." % [
+		state.tank, roundi(GameState.HAUL_INTERVAL / 60.0), roundi(state.haul_fee() * 100.0)], 4.0)
+	state.tank = 0.0
+	sfx("impactMetal_002")
+
+
+func _make_sack(p: Vector3, kg: float) -> Node3D:
+	var n := Node3D.new()
+	add_child(n)
+	n.global_position = p
+	var mi := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.36
+	sm.height = 0.62
+	sm.radial_segments = 14
+	sm.rings = 7
+	mi.mesh = sm
+	mi.position.y = 0.28
+	mi.scale = Vector3(1.0, 1.0, 0.85)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.82, 0.72, 0.52)
+	m.roughness = 1.0
+	mi.material_override = m
+	n.add_child(mi)
+	var tie := MeshInstance3D.new()
+	var tm := CylinderMesh.new()
+	tm.top_radius = 0.05
+	tm.bottom_radius = 0.09
+	tm.height = 0.16
+	tie.mesh = tm
+	tie.position.y = 0.64
+	tie.material_override = m
+	n.add_child(tie)
+	var l := Label3D.new()
+	l.text = "Rust sack  %.0f kg" % kg
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.fixed_size = true
+	l.font_size = 22
+	l.pixel_size = 0.0011
+	l.outline_size = 8
+	l.position.y = 0.95
+	n.add_child(l)
+	return n
+
+
+func _update_hauler(dt: float) -> void:
+	if state.sacks.is_empty():
+		_haul_t = GameState.HAUL_INTERVAL
+		return
+	_haul_t -= dt
+	if _haul_t > 0.0:
+		return
+	_haul_t = GameState.HAUL_INTERVAL
+	var kg := 0.0
+	for sk in state.sacks:
+		kg += float(sk[3])
+	var gross := kg * state.price_now()
+	var net := gross * (1.0 - state.haul_fee())
+	state.credits += net
+	state.earned += net
+	state.total_sold += kg
+	hud.toast("The hauler picked up %d sack%s (%.0f kg): +%s after a %s fee." % [
+		state.sacks.size(), "" if state.sacks.size() == 1 else "s", kg, GameState.inr(net), GameState.inr(gross - net)], 4.5)
+	for n in _sack_nodes:
+		var tw := n.create_tween()
+		tw.tween_property(n, "position:y", n.position.y + 30.0, 2.0).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+		tw.tween_callback(n.queue_free)
+	_sack_nodes.clear()
+	state.sacks.clear()
+	sfx("thrusterFire_000")
+
+
+func hex_bonus(k: Vector2i) -> int:
+	var c := RustField.key_center(k)
+	return state.hex_bonus(rust.hex_pristine_kg(k), state.crust_at(c.x, c.y))
 
 
 # ---------------------------------------------------------------- per frame
@@ -817,6 +967,7 @@ func _process(dt: float) -> void:
 	elif _clean_loop.volume_db <= -49.5 and _clean_loop.playing:
 		_clean_loop.stop()
 	_update_pods(dt)
+	_update_hauler(dt)
 	_update_interaction()
 	_autosave_t += dt
 	if _autosave_t > 60.0:
@@ -936,14 +1087,24 @@ func _update_interaction() -> void:
 	if v == null:
 		var p := player.global_position
 		if _flat_dist(p, DEPOT) < 6.5:
-			if state.tank > 0.05:
-				prompt = "[E] Export %.1f kg of rust at %s/kg  (+%s)" % [state.tank, GameState.inr(state.price_now()), GameState.inr(state.tank * state.price_now())]
+			var kg := state.tank + _cart_at_depot()
+			if kg > 0.05:
+				prompt = "[E] Export %.1f kg of rust%s at %s/kg  (+%s)" % [kg, " (tank + handcart)" if _cart_at_depot() > 0.0 else "",
+					GameState.inr(state.price_now()), GameState.inr(kg * state.price_now())]
 				_act = "export"
 			else:
 				prompt = "Export depot: bring rust here to ship it off-world"
 		elif _flat_dist(p, TERMINAL) < 4.0:
 			prompt = "[E] Open base terminal  (upgrades · solar · vehicles)"
 			_act = "shop"
+		elif cart and cart.pushing:
+			prompt = "[E] Let go of the handcart  (%.0f / %.0f kg)" % [cart.load_kg, cart.capacity()]
+			_act = "cart_release"
+		elif cart and _flat_dist(p, cart.global_position) < 2.6:
+			prompt = "[E] Push the handcart  (%.0f / %.0f kg)" % [cart.load_kg, cart.capacity()]
+			if state.tank > 0.05:
+				prompt += "  ·  [Q] tip your tank in"
+			_act = "cart_grab"
 		elif pod and pod.landed and not pod.opened and _flat_dist(p, pod.global_position) < 3.8:
 			prompt = "[E] Open the supply pod"
 			_act = "open_pod"
@@ -1016,6 +1177,8 @@ func _unhandled_input(e: InputEvent) -> void:
 		sfx("forceField_001")
 	elif e.is_action_pressed("vehicle_empty") and driven() == sweeper:
 		empty_hopper()
+	elif e.is_action_pressed("vehicle_empty") and player.active:
+		unload_tank()
 	elif e.is_action_pressed("torch") and not ui_open:
 		var dv := driven()
 		if dv:
@@ -1047,8 +1210,11 @@ func _unhandled_input(e: InputEvent) -> void:
 func _do_action() -> void:
 	match _act:
 		"export":
-			var c := state.sell(state.tank)
-			hud.toast("Exported %.1f kg of rust  ->  +%s" % [state.tank, GameState.inr(c)], 3.0)
+			var kg := state.tank + _cart_at_depot()
+			if _cart_at_depot() > 0.0:
+				cart.empty()
+			var c := state.sell(kg)
+			hud.toast("Exported %.1f kg of rust  ->  +%s" % [kg, GameState.inr(c)], 3.0)
 			state.tank = 0.0
 			sfx("computerNoise_000")
 		"shop":
@@ -1056,6 +1222,11 @@ func _do_action() -> void:
 			sfx("computerNoise_002")
 		"open_pod":
 			_open_pod()
+		"cart_grab":
+			cart.set_pushing(true)
+			hud.toast("Pushing the handcart. You can't clean or sprint while pushing; E to let go.", 3.0)
+		"cart_release":
+			cart.set_pushing(false)
 		"plug":
 			plugged[_act_vehicle] = _post_index
 			hud.toast("%s plugged in. It charges from the base battery." % _act_vehicle.display_name(), 2.5)
@@ -1094,7 +1265,37 @@ func _flat_dist(a: Vector3, b: Vector3) -> float:
 
 
 ## Price of the next level of an item, or -1 if it can't be bought right now.
+## What a shop item costs right now (difficulty applied), or -1 if it can't be bought.
 func price(item: String) -> int:
+	if lock_reason(item) != "":
+		return -1
+	var c := _base_price(item)
+	if c <= 0 or item.begins_with("paint_"):
+		return c
+	return int(round(c * float(state.diff().cost) / 100.0)) * 100
+
+
+## Why an item is locked ("" when it isn't): rank, hexagons or tool mastery still needed.
+func lock_reason(item: String) -> String:
+	match item:
+		"tool":
+			return state.lock_reason("tool_%d" % (state.tool_lvl + 1))
+		"tank":
+			return state.lock_reason("tank_%d" % (state.tank_lvl + 1))
+		"sweeper", "charger", "drone":
+			if item == "drone" and state.drones > 0:
+				return ""
+			var r := state.lock_reason(item)
+			if item == "charger" and not state.sweeper_owned:
+				r = "own the Sweeper" + (" · " + r if r != "" else "")
+			return r
+		"power", "width", "reach":
+			if state.mods[item] < int(GameState.TOOL_MODS[item].max) and state.mods[item] >= state.mastery_level():
+				return "%s mastery %s (%.0f kg more rust)" % [state.tool().name, "★".repeat(state.mods[item] + 1), state.mastery_next_kg()]
+	return ""
+
+
+func _base_price(item: String) -> int:
 	match item:
 		"tool":
 			return GameState.TOOLS[state.tool_lvl + 1].cost if state.tool_lvl < GameState.TOOLS.size() - 1 else -1
@@ -1104,6 +1305,8 @@ func price(item: String) -> int:
 			return GameState.TANKS[state.tank_lvl + 1].cost if state.tank_lvl < GameState.TANKS.size() - 1 else -1
 		"boots":
 			return GameState.BOOTS[state.boots_lvl + 1].cost if state.boots_lvl < GameState.BOOTS.size() - 1 else -1
+		"cart":
+			return GameState.CARTS[state.cart_lvl + 1].cost if state.cart_lvl < GameState.CARTS.size() - 1 else -1
 		"panel":
 			return state.panel_cost() if state.panels < GameState.MAX_PANELS else -1
 		"sweeper":
@@ -1156,6 +1359,14 @@ func buy(item: String) -> bool:
 			state.tank_lvl += 1
 		"boots":
 			state.boots_lvl += 1
+		"cart":
+			state.cart_lvl += 1
+			if cart == null:
+				state.cart = {pos = [DEPOT.x - 4.0, 0.0, DEPOT.z + 4.0], yaw = 0.0, kg = 0.0}
+				_spawn_cart()
+				hud.toast("Your handcart is waiting by the export depot. E to push it; Q next to it tips your tank in.", 5.0)
+			else:
+				cart._update_fill()
 		"panel":
 			state.panels += 1
 			_refresh_solar()
@@ -1315,6 +1526,8 @@ func save_game() -> void:
 	else:
 		state.player_pos = player.global_position + Vector3(0, 0.2, 0)
 	state.player_yaw = player.yaw
+	if cart:
+		state.cart = {pos = [cart.global_position.x, cart.global_position.y, cart.global_position.z], yaw = cart.rotation.y, kg = cart.load_kg}
 	for veh in [sweeper, charger]:
 		state.vehicles[veh.kind] = [veh.global_position.x, veh.global_position.y, veh.global_position.z, veh.heading]
 	state.save(rust)

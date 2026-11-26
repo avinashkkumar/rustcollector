@@ -233,16 +233,17 @@ func _physics_process(dt: float) -> void:
 	# Battery drain (game time runs at TIME_SCALE).
 	if driving:
 		# Boost costs ~3.4x the power for ~1.5x the speed: more kWh per kilometre.
-		var draw := absf(throttle) * drive_kw * (3.4 if boosting else 1.0) * (1.0 + 0.5 * (1.0 - float(cond.motor))) + (sweep_kw if sweeping else 0.0) + 0.15
+		var draw := (absf(throttle) * drive_kw * (3.4 if boosting else 1.0) * (1.0 + 0.5 * (1.0 - float(cond.motor))) + (sweep_kw if sweeping else 0.0) + 0.15) * float(world.state.diff().drain)
 		energy = maxf(energy - draw * dt / GameState.TIME_SCALE, 0.0)
 		if energy > 0.5 and float(cond.motor) > 0.0:
 			flat_warned = false
 		# Wear: tyres by distance (boost wears them ~3x faster), motor by throttle, brush by use.
 		var frac := absf(speed) / max_speed
-		cond.tyres = maxf(float(cond.tyres) - dt * frac * (0.0022 if boosting else 0.0007), 0.0)
-		cond.motor = maxf(float(cond.motor) - dt * absf(throttle) * (0.0012 if boosting else 0.00035), 0.0)
+		var wm := float(world.state.diff().wear)
+		cond.tyres = maxf(float(cond.tyres) - dt * frac * (0.0022 if boosting else 0.0007) * wm, 0.0)
+		cond.motor = maxf(float(cond.motor) - dt * absf(throttle) * (0.0012 if boosting else 0.00035) * wm, 0.0)
 		if sweeping:
-			cond.brush = maxf(float(cond.brush) - dt * 0.0009, 0.0)
+			cond.brush = maxf(float(cond.brush) - dt * 0.0009 * wm, 0.0)
 
 
 ## Benchmark: place the vehicle on the terrain and face along the path.
