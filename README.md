@@ -29,6 +29,12 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
   battery; a failed motor stops the vehicle. Grime builds up and a dying motor smokes. Repair parts
   in the **Workshop** (base terminal) with the vehicle parked in its garage bay, or tow it there.
 - **Drones** work on their own inside a hexagon zone around the base (upgradeable 1–4 rings).
+- **Worlds** (like Minecraft): keep as many separate colonies as you like. *Worlds* on the title
+  screen lists them with sol, balance, hexes, play time and seed; Play, Rename or Delete (asks to
+  confirm). *Create new world* takes a name and an optional seed: blank is random, a number is used
+  as-is, any word works too. Each world has its own terrain and its own save under
+  `user://worlds/<id>/`; *Continue* opens the last one played. A save from an older version moves
+  into a world called "My colony" automatically.
 - **Tracks:** tyres press twin tracks into the rust (with berms); boots leave footprints.
 - **Supply pods** (PUBG-style airdrops) land somewhere on the plain every few minutes with a light
   beacon. Open them for ₹, **repair kits** (G at a vehicle: +50% to its worst part) and **battery

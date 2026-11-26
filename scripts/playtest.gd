@@ -18,6 +18,8 @@ func run() -> void:
 	await _paint_flow()
 	await _key_guide_flow()
 	await _save_flow()
+	await _worlds_flow()
+	await _menu_flow()
 	print("PLAYTEST RESULT: %d passed, %d failed" % [passed, failed])
 	get_tree().quit(1 if failed > 0 else 0)
 
@@ -219,6 +221,106 @@ func _key_guide_flow() -> void:
 	await _press("key_guide")
 	await _press("pause")
 	check(not world.hud.key_guide.visible and not get_tree().paused, "Esc closes the key guide without opening the pause menu")
+
+
+func _worlds_flow() -> void:
+	print("[worlds]")
+	check(Worlds.root == "user://dev/worlds/", "playtest worlds live in the developer folder")
+	var a: String = Worlds.list()[0].id
+	check(GameState.save_dir == Worlds.dir_of(a), "the running world saves into its own folder")
+	check(Worlds.parse_seed("12345") == 12345, "a number seed is used as-is")
+	check(Worlds.parse_seed("mars") == Worlds.parse_seed("mars") and Worlds.parse_seed("mars") != Worlds.parse_seed("moon"), "word seeds are stable and distinct")
+	var b := Worlds.create("Second colony", "777")
+	var c := Worlds.create("", "")
+	check(Worlds.read_meta(c).name == "Colony 1", "blank name gets a default (%s)" % Worlds.read_meta(c).name)
+	check(Worlds.list().size() == 3, "three worlds listed")
+	check(Worlds.list()[0].id == a, "the world with progress is listed first")
+	Worlds.select(b)
+	check(not GameState.has_save(), "a new world starts without a save")
+	Worlds.select(a)
+	check(GameState.has_save(), "the first world still has its save")
+	# Different seeds give different terrain.
+	var t1 := Terrain.new()
+	t1.seed_value = 4242
+	t1.setup()
+	var t2 := Terrain.new()
+	t2.seed_value = 777
+	t2.setup()
+	var differs := false
+	for i in 8:
+		if absf(t1.height_at(60.0 + i * 37.0, -80.0) - t2.height_at(60.0 + i * 37.0, -80.0)) > 0.05:
+			differs = true
+	check(differs, "different seeds make different terrain")
+	t1.free()
+	t2.free()
+	Worlds.rename(b, "  Red Valley  ")
+	check(Worlds.read_meta(b).name == "Red Valley", "rename trims and saves the name")
+	Worlds.rename(b, "   ")
+	check(Worlds.read_meta(b).name == "Red Valley", "a blank rename is ignored")
+	Worlds.delete(c)
+	check(Worlds.read_meta(c).is_empty() and not DirAccess.dir_exists_absolute(Worlds.dir_of(c)), "delete removes the world folder")
+	check(Worlds.select(a).name == "Dev world", "deleting one world leaves the others alone")
+	# Legacy single save -> its own world.
+	DirAccess.make_dir_recursive_absolute("user://dev/legacy/")
+	DirAccess.copy_absolute(Worlds.dir_of(a) + "save.json", "user://dev/legacy/save.json")
+	DirAccess.copy_absolute(Worlds.dir_of(a) + "save_rust.bin", "user://dev/legacy/save_rust.bin")
+	var m := Worlds.migrate_legacy("user://dev/legacy/")
+	check(m != "" and FileAccess.file_exists(Worlds.dir_of(m) + "save.json") and not FileAccess.file_exists("user://dev/legacy/save.json"),
+		"an old single save moves into a world called %s" % Worlds.read_meta(m).get("name", "?"))
+	check(Worlds.read_meta(m).seed == 4242, "the migrated world keeps the old terrain seed")
+	Worlds.delete(m)
+	Worlds.select(a)
+
+
+func _menu_flow() -> void:
+	print("[world menu]")
+	world.hud.visible = false
+	var menu := MainMenu.new()
+	var played := []
+	menu.play_world.connect(func(id: String, is_new: bool) -> void: played.append([id, is_new]))
+	var layer := CanvasLayer.new()
+	layer.layer = 50
+	add_child(layer)
+	layer.add_child(menu)
+	await _frames(3)
+	var cont: Button = menu._main.get_child(0)
+	check(cont.text == "Continue: Dev world", "Continue offers the last played world (%s)" % cont.text)
+	menu.show_worlds()
+	await _frames(3)
+	check(menu._world_list.get_child_count() == 2, "world list shows both worlds")
+	await _shot("6_worlds")
+	var row: Control = menu._world_list.get_child(1)
+	var hb: HBoxContainer = row.get_child(0)
+	var del: Button = hb.get_child(3)
+	del.pressed.emit()
+	check(del.text == "Sure?" and Worlds.list().size() == 2, "first Delete click only asks to confirm")
+	del.pressed.emit()
+	await _frames(3)
+	check(Worlds.list().size() == 1 and menu._world_list.get_child_count() == 1, "second click deletes the world")
+	var rename_btn: Button = (menu._world_list.get_child(0).get_child(0) as HBoxContainer).get_child(2)
+	rename_btn.pressed.emit()
+	await _frames(2)
+	var info: VBoxContainer = (menu._world_list.get_child(0).get_child(0) as HBoxContainer).get_child(0)
+	var edit: LineEdit = info.get_child(0)
+	edit.text = "Olympus Base"
+	edit.text_submitted.emit(edit.text)
+	await _frames(3)
+	check(Worlds.list()[0].name == "Olympus Base", "rename in the list works")
+	var play: Button = (menu._world_list.get_child(0).get_child(0) as HBoxContainer).get_child(1)
+	play.pressed.emit()
+	check(played.size() == 1 and played[0][0] == Worlds.list()[0].id and played[0][1] == false, "Play opens that world (not as new)")
+	menu._show(menu._create)
+	await _frames(2)
+	check(menu._name_edit.placeholder_text == "Colony 1", "create screen suggests a name")
+	menu._name_edit.text = "Hellas Camp"
+	menu._seed_edit.text = "dusty"
+	await _shot("7_create_world")
+	menu._seed_edit.text_submitted.emit("dusty")
+	await _frames(2)
+	var made := Worlds.read_meta(played[-1][0])
+	check(played.size() == 2 and played[-1][1] == true and made.name == "Hellas Camp" and made.seed == Worlds.parse_seed("dusty"),
+		"Create & play makes the world with that name and seed and starts it as new")
+	layer.queue_free()
 
 
 func _save_flow() -> void:
