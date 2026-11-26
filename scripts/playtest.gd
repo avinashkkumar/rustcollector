@@ -22,6 +22,8 @@ func run() -> void:
 	await _torch_flow()
 	await _infra_flow()
 	await _panel_flow()
+	await _depot_drive_flow()
+	await _sack_flow()
 	await _save_flow()
 	await _worlds_flow()
 	await _menu_flow()
@@ -567,14 +569,24 @@ func _infra_flow() -> void:
 	ev.pressed = true
 	var was := DisplayServer.window_get_mode()
 	Input.parse_input_event(ev)
-	await get_tree().create_timer(0.8).timeout
+	await _wait_mode(func(m): return m != was)
 	var now := DisplayServer.window_get_mode()
 	check(now != was, "F11 switches between windowed and fullscreen (%d -> %d)" % [was, now])
 	if now == DisplayServer.WINDOW_MODE_FULLSCREEN:
 		check(DisplayServer.window_get_size() == DisplayServer.screen_get_size(), "fullscreen covers the whole screen (%s)" % str(DisplayServer.window_get_size()))
 	Input.parse_input_event(ev)
-	await get_tree().create_timer(0.8).timeout
-	check(DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_FULLSCREEN, "F11 again goes back to a window")
+	var was_fs := was == DisplayServer.WINDOW_MODE_FULLSCREEN
+	await _wait_mode(func(m): return (m == DisplayServer.WINDOW_MODE_FULLSCREEN) == was_fs)
+	check((DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN) == was_fs,
+		"F11 again goes back (%d -> %d)" % [now, DisplayServer.window_get_mode()])
+
+
+## Window-mode changes are asynchronous on some window managers: wait up to 3 s.
+func _wait_mode(ok: Callable) -> void:
+	for i in 30:
+		await get_tree().create_timer(0.1).timeout
+		if ok.call(DisplayServer.window_get_mode()):
+			return
 
 
 func _panel_flow() -> void:
@@ -671,3 +683,144 @@ func _save_flow() -> void:
 	check((loaded.liveries.sweeper as Array).has("saffron"), "owned paint jobs survive a reload")
 	check(loaded.repair_kits == 3 and loaded.battery_cells == 2, "kits and cells survive a reload")
 	check(loaded.pods_opened == 1, "opened pod count survives a reload")
+
+
+
+## Drives `v` toward `target` with real throttle and steering input until it is within `r` metres
+## (or `limit` seconds pass). Returns the closest distance reached.
+func _drive_to(v: Vehicle, target: Vector3, r: float, limit := 22.0) -> float:
+	var best := 999.0
+	var t := 0.0
+	while t < limit and best >= r:
+		var to := target - v.global_position
+		var err := wrapf(atan2(-to.x, -to.z) - v.heading, -PI, PI)
+		Input.action_release("move_left")
+		Input.action_release("move_right")
+		if err > 0.05:
+			Input.action_press("move_left", clampf(err * 2.0, 0.2, 1.0))
+		elif err < -0.05:
+			Input.action_press("move_right", clampf(-err * 2.0, 0.2, 1.0))
+		Input.action_press("move_forward", 0.6)
+		await get_tree().physics_frame
+		t += 1.0 / Engine.physics_ticks_per_second
+		best = minf(best, Vector2(to.x, to.z).length())
+	for a in ["move_forward", "move_left", "move_right"]:
+		Input.action_release(a)
+	v.speed = 0.0
+	await _frames(10)
+	return best
+
+
+func _put_vehicle(v: Vehicle, at: Vector3, face: Vector3) -> void:
+	v.global_position = Vector3(at.x, world.terrain.height_at(at.x, at.z) + 0.5, at.z)
+	var d := face - at
+	v.heading = atan2(-d.x, -d.z)
+	v.rotation.y = v.heading
+	v.speed = 0.0
+	v.velocity = Vector3.ZERO
+
+
+func _enter(v: Vehicle) -> void:
+	await _stand_near(v.global_position, Vector3(3, 0, 0), v.global_position)
+	await _press("interact")
+	await _frames(10)
+
+
+## The Sweeper must drive back onto the base pad and up to the depot from every open side
+## (the pad's edge used to be a wall a vehicle body could not climb).
+func _depot_drive_flow() -> void:
+	print("[sweeper to the export depot]")
+	var s := world.state
+	s.sweeper_owned = true
+	world._set_vehicle_present(world.sweeper, true)
+	var v := world.sweeper
+	v.energy = v.battery
+	for leg: Array in [[Vector3(45, 0, 3), World.DEPOT], [Vector3(40, 0, -30), World.DEPOT], [Vector3(40, 0, 30), World.DEPOT],
+			[Vector3(-35, 0, 1), World.DEPOT]]:
+		_put_vehicle(v, leg[0], leg[1])
+		await _enter(v)
+		check(world.driven() == v, "in the Sweeper at %s" % leg[0])
+		var best := await _drive_to(v, leg[1], World.DEPOT_DRIVE_R - 1.0)
+		check(best < World.DEPOT_DRIVE_R, "Sweeper from %s drives up to the depot (closest %.1f m)" % [leg[0], best])
+		if leg[0] == Vector3(45, 0, 3):
+			s.hopper = 120.0
+			await _frames(3)
+			check(world.hud.prompt_lbl.text.contains("[Q] Export the hopper"), "depot prompt shows in the Sweeper (%s)" % world.hud.prompt_lbl.text)
+			var c0 := s.credits
+			await _press("vehicle_empty")
+			check(s.hopper == 0.0 and s.credits > c0, "Q at the depot exports the hopper (+%s)" % GameState.inr(s.credits - c0))
+		await _press("interact")
+		await _frames(10)
+	# Off the pad and back on again across each edge (north and south lanes are clear of buildings).
+	for leg: Array in [[Vector3(-30, 0, -45), Vector3(-30, 0, -12)], [Vector3(14, 0, 45), Vector3(14, 0, 17)]]:
+		_put_vehicle(v, leg[0], leg[1])
+		await _enter(v)
+		var best := await _drive_to(v, leg[1], 2.0)
+		check(best < 2.5, "Sweeper crosses the pad edge from %s (closest %.1f m to %s)" % [leg[0], best, leg[1]])
+		await _press("interact")
+		await _frames(10)
+
+
+func _sack_flow() -> void:
+	print("[rust sacks]")
+	var s := world.state
+	var v := world.sweeper
+	var spot := Vector3(60, 0, 60)
+	world.cart.place(Vector3(-30, 0, 30), 0.0)
+	s.sacks.clear()
+	for n in world._sack_nodes:
+		n.queue_free()
+	world._sack_nodes.clear()
+	world._haul_t = GameState.HAUL_INTERVAL
+	# Sweeper: Q away from the depot bags the whole hopper into one sack.
+	_put_vehicle(v, spot, spot + Vector3(0, 0, -10))
+	await _enter(v)
+	v.tool_on = false
+	s.hopper = 300.0
+	await _press("vehicle_empty")
+	check(s.hopper == 0.0 and s.sacks.size() == 1, "Q in the Sweeper bags the hopper (%d sack)" % s.sacks.size())
+	check(s.sacks.size() == 1 and is_equal_approx(float(s.sacks[0][3]), 300.0), "the sack holds all 300 kg")
+	await _shot("sack_from_sweeper")
+	# Turn round and drive over it with the brush on: every kilogram comes back.
+	var sp: Array = s.sacks[0]
+	var sack_pos := Vector3(sp[0], sp[1], sp[2])
+	_put_vehicle(v, sack_pos + Vector3(0, 0, -8), sack_pos)
+	v.tool_on = true
+	var before := s.hopper
+	await _drive_to(v, sack_pos, 0.5, 8.0)
+	check(s.sacks.is_empty(), "driving over the sack with the brush on scoops it up")
+	check(s.hopper - before >= 300.0, "hopper got the full 300 kg back (+%.0f kg)" % (s.hopper - before))
+	v.tool_on = false
+	await _press("interact")
+	await _frames(10)
+	s.hopper = 0.0
+	# On foot: drop the tank, pick it straight back up with E.
+	await _stand_near(spot + Vector3(12, 0, 0), Vector3.ZERO, spot + Vector3(12, 0, -10))
+	s.tank = 20.0
+	await _press("vehicle_empty")
+	check(s.tank == 0.0 and s.sacks.size() == 1, "Q on foot drops a 20 kg sack")
+	await _frames(3)
+	check(world.hud.prompt_lbl.text.contains("[E] Pick up the 20 kg rust sack"), "pick-up prompt (%s)" % world.hud.prompt_lbl.text)
+	await _press("interact")
+	check(is_equal_approx(s.tank, 20.0) and s.sacks.is_empty(), "E puts all 20 kg back in the tank")
+	# Partial pick-up when the tank is nearly full.
+	await _press("vehicle_empty")
+	s.tank = s.capacity() - 5.0
+	await _frames(3)
+	await _press("interact")
+	check(is_equal_approx(s.tank, s.capacity()), "a nearly full tank takes what fits")
+	check(s.sacks.size() == 1 and is_equal_approx(float(s.sacks[0][3]), 15.0), "the other 15 kg stay in the sack")
+	await _frames(3)
+	check(not world.hud.prompt_lbl.text.contains("[E] Pick up"), "no pick-up prompt with a full tank")
+	# With the handcart beside you the sack goes into the cart.
+	s.tank = 0.0
+	var p := world.player.global_position
+	world.cart.place(p + Vector3(2.0, 0, 0), 0.0)
+	world.cart.load_kg = 0.0
+	await _frames(3)
+	check(world.hud.prompt_lbl.text.contains("into the handcart"), "prompt offers the handcart (%s)" % world.hud.prompt_lbl.text)
+	await _press("interact")
+	check(is_equal_approx(world.cart.load_kg, 15.0) and s.sacks.is_empty() and s.tank == 0.0, "E loads the sack into the handcart")
+	await _shot("sack_into_cart")
+	world.cart.empty()
+	world.cart.place(Vector3(World.DEPOT.x - 4.0, 0, World.DEPOT.z + 4.0), 0.0)
