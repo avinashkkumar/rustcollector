@@ -11,6 +11,8 @@ var _world_list: VBoxContainer
 var _create: VBoxContainer
 var _name_edit: LineEdit
 var _seed_edit: LineEdit
+var _diff_pick: OptionButton
+var _diff_desc: Label
 var _settings: SettingsPanel
 var _bench_preset := "high"
 
@@ -174,8 +176,19 @@ func _build_worlds(stack: VBoxContainer) -> void:
 	_seed_edit.placeholder_text = "random"
 	_seed_edit.max_length = 40
 	_create.add_child(_seed_edit)
+	_create.add_child(UiKit.label("Difficulty (can't be changed later)", 16, UiKit.MUTED))
+	_diff_pick = OptionButton.new()
+	_diff_pick.custom_minimum_size = Vector2(520, 44)
+	for k in GameState.DIFFICULTY_ORDER:
+		_diff_pick.add_item(GameState.DIFFICULTIES[k].name)
+	_diff_pick.selected = 1
+	_create.add_child(_diff_pick)
+	_diff_desc = UiKit.label(GameState.DIFFICULTIES.standard.desc, 14, UiKit.MUTED)
+	_create.add_child(_diff_desc)
+	_diff_pick.item_selected.connect(func(i: int) -> void:
+		_diff_desc.text = GameState.DIFFICULTIES[GameState.DIFFICULTY_ORDER[i]].desc)
 	var go := func() -> void:
-		var id := Worlds.create(_name_edit.text, _seed_edit.text)
+		var id := Worlds.create(_name_edit.text, _seed_edit.text, GameState.DIFFICULTY_ORDER[_diff_pick.selected])
 		play_world.emit(id, true)
 	_name_edit.text_submitted.connect(func(_t: String) -> void: go.call())
 	_seed_edit.text_submitted.connect(func(_t: String) -> void: go.call())

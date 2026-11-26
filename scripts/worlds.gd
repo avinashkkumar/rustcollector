@@ -48,13 +48,15 @@ static func read_meta(id: String) -> Dictionary:
 		return {}
 	d.id = id
 	d.seed = int(d.get("seed", 4242))
+	d.difficulty = str(d.get("difficulty", "standard"))
 	return d
 
 
 static func _write_meta(id: String, m: Dictionary) -> void:
 	var f := FileAccess.open(dir_of(id) + "meta.json", FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({name = m.name, seed = int(m.seed), created = int(m.created)}, "  "))
+		f.store_string(JSON.stringify({name = m.name, seed = int(m.seed), created = int(m.created),
+			difficulty = str(m.get("difficulty", "standard"))}, "  "))
 
 
 ## Seed text like Minecraft: blank = random, a whole number = that number, any other text = its hash.
@@ -67,13 +69,14 @@ static func parse_seed(text: String) -> int:
 	return absi(t.hash()) % 2000000000
 
 
-static func create(world_name: String, seed_text: String) -> String:
+static func create(world_name: String, seed_text: String, difficulty := "standard") -> String:
 	var n := world_name.strip_edges()
 	if n == "":
 		n = next_default_name()
 	var id := "%d_%04d" % [int(Time.get_unix_time_from_system()), randi() % 10000]
 	DirAccess.make_dir_recursive_absolute(dir_of(id))
-	_write_meta(id, {name = n, seed = parse_seed(seed_text), created = int(Time.get_unix_time_from_system())})
+	_write_meta(id, {name = n, seed = parse_seed(seed_text), created = int(Time.get_unix_time_from_system()),
+		difficulty = difficulty if GameState.DIFFICULTIES.has(difficulty) else "standard"})
 	return id
 
 
@@ -127,10 +130,10 @@ static func migrate_legacy(from_dir := "user://") -> String:
 static func describe(w: Dictionary) -> String:
 	var when := Time.get_datetime_string_from_unix_time(int(w.last_played) + _tz_offset(), true).substr(0, 16)
 	if not w.played:
-		return "New world  ·  seed %d  ·  created %s" % [w.seed, when]
+		return "New world  ·  %s  ·  seed %d  ·  created %s" % [GameState.DIFFICULTIES[w.difficulty].name, w.seed, when]
 	var mins := int(float(w.play_time) / 60.0)
-	return "Sol %d  ·  %s  ·  %d hexes  ·  %dh %02dm played  ·  %s  ·  seed %d" % [
-		w.sol, GameState.inr(w.credits), w.hexes, mins / 60, mins % 60, when, w.seed]
+	return "%s  ·  Sol %d  ·  %s  ·  %d hexes  ·  %dh %02dm  ·  %s  ·  seed %d" % [
+		GameState.DIFFICULTIES[w.difficulty].name, w.sol, GameState.inr(w.credits), w.hexes, mins / 60, mins % 60, when, w.seed]
 
 
 static func _tz_offset() -> int:

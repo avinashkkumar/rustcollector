@@ -82,6 +82,7 @@ func start_game(world_id: String, is_new: bool) -> void:
 	w.mode = "play"
 	w.seed_value = int(meta.seed)
 	w.world_name = str(meta.name)
+	w.difficulty = str(meta.get("difficulty", "standard"))
 	w.load_save = GameState.has_save()
 	w.quit_to_menu.connect(func() -> void: show_menu.call_deferred())
 	_swap(w)
