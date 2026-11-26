@@ -14,10 +14,27 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
 
 - **Clean** rust off the ground. The layer is ~14 cm thick and cleared ground drops to bare brown rock.
 - **Export** rust at the depot for ₹ (the market price drifts between about ₹19 and ₹32/kg).
-- **Hexagons:** the whole plain is a hex grid. Every hexagon cleaned to 90% pays a ₹2,000 bonus.
-- **Base terminal:** tools (5 tiers) + upgrade tracks (motor power, head width, reach), tank,
-  boots, solar panels, vehicles, drones, drone range, towing.
-- **Power:** solar panels (bought, none at start) charge the base battery during the day.
+- **Hexagons:** the whole plain is a hex grid. Every hexagon cleaned to 90% pays a bonus that grows
+  with how much rust it held and how hard that rust was (about ₹2,500 near the base, more further
+  out). The minimap panel shows the hexagon's crust, progress and bonus; you hear at 50%.
+- **Difficulty** per world (chosen when you create it): *Relaxed*, *Standard* or *Hard* changes
+  prices, upgrade costs, wear, battery drain, mastery speed, the hauler's fee and how close to the
+  base the crust starts.
+- **Crust:** the rust gets harder further from the base (Crust I–IV at 140 / 320 / 600 m on
+  Standard, darker on the ground). A tool below the needed tier cleans at 25% per missing tier, so
+  you have to upgrade to push outward. The Sweeper handles up to Crust III, drones Crust II.
+- **Progression, on foot first:** each tool earns **mastery stars** (★1–★5) from the rust it
+  cleans (+5% speed each); power / width / reach upgrades can't go above your stars, and width adds
+  only 6% radius per level. Better tools and tanks unlock with **contractor rank**; the **Sweeper**
+  needs rank *Grit Grinder* **and 25 hexagons cleared by hand**, the Charger cart *Plain Sweeper*,
+  drones *Hex Hunter*. Locked items show what they still need.
+- **Handcart:** push it (E) to where you work, tip your tank in (Q), push it back and export it
+  with your tank at the depot. Away from the cart, **Q drops your tank as a rust sack**; the hauler
+  collects sacks every 2 minutes for a fee (10 / 25 / 40% by difficulty).
+- **Base terminal** has tabs: Tools, Gear, Power, Vehicles, Workshop, Drones, Paint.
+- **Power:** solar panels (bought, none at start) charge the base battery during the day. You
+  place them yourself: **P** shows a preview where you aim (green = OK, red says why not), **R**
+  rotates, left-click places, **E** on a placed panel picks it up again. Within 60 m of the base.
   Vehicles charge **only in the garage**: park in a bay, walk to the charging post and press **E**
   to plug the cable in (E again to unplug). A plugged-in vehicle will not drive.
 - **Vehicles** (bought, none at start) roll on Mars-rover style wheels (open aluminium drums,
@@ -36,12 +53,14 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
   `user://worlds/<id>/`; *Continue* opens the last one played. A save from an older version moves
   into a world called "My colony" automatically.
 - **Tracks:** tyres press twin tracks into the rust (with berms); boots leave footprints.
+- **Buildings** collide with their real shapes. **Space** facing a ledge up to 2.5 m pulls you up
+  (works mid-jump too); ladders on the garage and hangars reach the roofs. **L** is your torch.
 - **Supply pods** (PUBG-style airdrops) land somewhere on the plain every few minutes with a light
   beacon. Open them for ₹, **repair kits** (G at a vehicle: +50% to its worst part) and **battery
   cells** (B at a vehicle: +10 kWh). **T** drops a waypoint beacon where you look.
 - **Contractor ranks** (CS-style), from Rust Rookie to Legend of Rustfall, each adding +3% to the
   export price; an **end-of-sol report** card (rust, ₹, hexes, relics, MVP); vehicle **paint jobs**.
-- **Missions** (19) guide the early game; **relics** (12) turn up under the rust; a 16-minute
+- **Missions** (20) guide the early game; **relics** (12) turn up under the rust; a 16-minute
   day/night cycle; the plain never ends.
 
 ### Controls
@@ -50,15 +69,18 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
 |---|---|---|---|
 | WASD | move | W/S | throttle / brake & reverse |
 | Shift | sprint | A/D | steer |
-| Space | jump | Shift | boost (faster, much more power per km) |
+| Space | jump; at a ledge, climb up | Shift | boost (faster, much more power per km) |
 | LMB or F | clean | Space | handbrake |
 | E | interact (depot, terminal, vehicles) | R | brush / charge cable on-off |
 | M | big map | Q | empty hopper (export at depot, dump elsewhere) |
 | H | hexagon grid on/off | E | exit vehicle |
 | T | waypoint (T on it again removes it) | mouse | free look (recentres by itself) |
+| Q | tip tank into handcart, or drop a sack | L | headlights on/off |
+| P / R | place solar panel / rotate it | | |
+| L | torch | | |
 | G / B | use repair kit / battery cell at a vehicle | V | chase / hood camera |
 | F3 | FPS counter | F1 | key guide (full keyboard map) |
-| Esc | pause menu (settings, mission log) | | |
+| Esc | pause menu (settings, mission log) | F11 / Alt+Enter | fullscreen on/off |
 
 ---
 
