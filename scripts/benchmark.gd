@@ -320,8 +320,8 @@ func _run_rover(u: float) -> void:
 	var heading := atan2(-tangent.x, -tangent.z)
 	var spd := r * TAU * 1.1 / float(STAGES[3].dur)
 	world.sweeper.autopilot_place(pos, heading, spd)
-	# The charger cart trails the sweeper with its charge cable connected.
-	var a2 := a - 0.22
+	# The charger cart drives alongside the sweeper with its charge cable connected.
+	var a2 := a + 0.16  # slightly ahead, so its tracks run through the chase camera view
 	var pos2 := SWEEP_CIRCLE + Vector3(cos(a2), 0, sin(a2)) * (r + 4.4)  # outside the swept swath so its tracks show
 	var t2 := Vector3(-sin(a2), 0, cos(a2))
 	world.charger.autopilot_place(pos2, atan2(-t2.x, -t2.z), spd)
@@ -563,6 +563,7 @@ func build_summary() -> Dictionary:
 		stages = stages_out,
 		rust_cleaned_kg = world.cleaned_kg_total,
 		texture_uploads = world.rust.uploads,
+		track_chunks = world.rust.tracks.size(),
 	}
 
 
