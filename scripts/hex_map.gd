@@ -88,6 +88,16 @@ func _draw() -> void:
 	for v in [world.sweeper, world.charger]:
 		if world.owns(v):
 			draw_circle(to_map.call(v.global_position), 4.0, Color(1, 0.85, 0.2) if v == world.sweeper else Color(0.4, 1, 0.6))
+	# Waypoint and supply pod, clamped to the map edge when off-map (PUBG style).
+	for item in [[world.waypoint, Color(0.4, 0.9, 1.0)], [world.pod, Color(1.0, 0.65, 0.25)]]:
+		var node: Node3D = item[0]
+		if node and is_instance_valid(node):
+			var mp: Vector2 = to_map.call(node.global_position)
+			var cl := Vector2(clampf(mp.x, 6, sz.x - 6), clampf(mp.y, 6, sz.y - 6))
+			var col: Color = item[1]
+			draw_colored_polygon(PackedVector2Array([cl + Vector2(0, -6), cl + Vector2(5, 0), cl + Vector2(0, 6), cl + Vector2(-5, 0)]), col)
+			if cl != mp:
+				draw_arc(cl, 8.0, 0, TAU, 12, col, 1.0)
 	var yaw: float = world.driven().heading if world.driven() else world.player.yaw
 	var c: Vector2 = sz * 0.5
 	var fwd := Vector2(-sin(yaw), -cos(yaw))
