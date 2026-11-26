@@ -120,6 +120,9 @@ func _draw() -> void:
 	draw_string(font, Vector2(mx + 8, my + 40), "LMB", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.45 if driving else 1.0))
 	draw_string(font, Vector2(mx, my + 196), "LMB: clean" if not driving else "Move: look around", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, FOOT if not driving else DRIVE)
 	draw_string(font, Vector2(mx, my + 218), "Move: look" if not driving else "(recentres itself)", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, UiKit.MUTED)
+	draw_rect(Rect2(mx + 49, my + 16, 12, 30), Color(DRIVE.r, DRIVE.g, DRIVE.b, 0.6 if driving else 0.15))
+	draw_string(font, Vector2(mx, my + 244), "Wheel: speed limit", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, DRIVE if driving else UiKit.MUTED)
+	draw_string(font, Vector2(mx, my + 264), "(while driving)", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, UiKit.MUTED)
 	# Legend.
 	var ly := origin.y + 6.0 * (U + 6.0) + 30.0
 	var items := [[FOOT, "On foot only"], [DRIVE, "Driving only"], [BOTH, "Everywhere (meaning can change)"]]

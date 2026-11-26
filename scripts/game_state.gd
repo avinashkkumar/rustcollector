@@ -142,6 +142,7 @@ var repairs_done := 0
 var difficulty := "standard"  # from the world's meta.json, not the save
 var cart_lvl := -1  # -1 = no handcart yet
 var panel_stock := 0  # bought but not placed yet (P to place)
+var drive_limit := 0.6  # vehicle speed limiter, 0.2-1.0 of top speed (mouse wheel while driving)
 var panel_spots: Array = []  # placed panels: [x, z, yaw]
 var cart := {pos = [4.0, 0.0, 3.0], yaw = 0.0, kg = 0.0}
 var sacks: Array = []  # [x, y, z, kg] waiting for the hauler
@@ -347,7 +348,7 @@ func to_dict() -> Dictionary:
 		collected = collected, earned = earned, missions_done = missions_done, story_seen = story_seen,
 		relics_found = relics_found, wear = wear, repairs_done = repairs_done, repair_kits = repair_kits,
 		battery_cells = battery_cells, pods_opened = pods_opened, mastery_kg = mastery_kg,
-		cart_lvl = cart_lvl, cart = cart, sacks = sacks, panel_stock = panel_stock, panel_spots = panel_spots, liveries = liveries, livery = livery,
+		cart_lvl = cart_lvl, cart = cart, sacks = sacks, panel_stock = panel_stock, drive_limit = drive_limit, panel_spots = panel_spots, liveries = liveries, livery = livery,
 		sol_start = sol_start, sol_kg = sol_kg, dig_meter = dig_meter, next_relic_kg = next_relic_kg, time_of_day = time_of_day, sol = sol,
 		player_pos = [player_pos.x, player_pos.y, player_pos.z], player_yaw = player_yaw, play_time = play_time,
 	}
@@ -387,6 +388,7 @@ func from_dict(d: Dictionary) -> void:
 	mastery_kg = d.get("mastery_kg", {})
 	cart_lvl = int(d.get("cart_lvl", -1))
 	panel_stock = int(d.get("panel_stock", 0))
+	drive_limit = clampf(float(d.get("drive_limit", 0.6)), 0.2, 1.0)
 	panel_spots = d.get("panel_spots", [])
 	cart = d.get("cart", cart)
 	sacks = d.get("sacks", [])

@@ -299,7 +299,8 @@ func _update_text() -> void:
 		var pct := v.energy / v.battery * 100.0
 		var kw := v.drive_kw + (v.sweep_kw if v.tool_on else 0.0) + 0.15
 		var range_km := v.energy / kw * GameState.TIME_SCALE * v.max_speed / 1000.0
-		batt_lbl.text = "Battery %d%% · ~%.1f km%s%s" % [roundi(pct), range_km, " · BOOST" if v.boosting else "", " · charging" if v.charging else ""]
+		batt_lbl.text = "Battery %d%% · ~%.1f km · %d km/h%s%s" % [roundi(pct), range_km, v.kmh(),
+			" · BOOST" if v.boosting else " (limit %d)" % roundi(v.top_speed() * v.limit() * 3.6), " · charging" if v.charging else ""]
 		batt_bar.max_value = v.battery
 		batt_bar.value = v.energy
 		# Only shown once something needs attention.
@@ -343,7 +344,7 @@ func _update_text() -> void:
 		key_guide.driving = v != null
 		key_guide.queue_redraw()
 	if v:
-		hint_lbl.text = "WASD drive · Shift boost · Space handbrake · mouse look · V camera · %sT waypoint · E exit · F1 all keys" % [
+		hint_lbl.text = "WASD drive · wheel speed limit · Shift boost · Space handbrake · mouse look · V camera · %sT waypoint · E exit · F1 all keys" % [
 			"R brush on/off · Q empty hopper · " if v == world.sweeper else ""]
 	else:
 		hint_lbl.text = "WASD move · Shift sprint · LMB/F clean · E interact · Q unload tank · L torch · T waypoint · M map · F1 all keys"

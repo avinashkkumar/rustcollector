@@ -30,7 +30,7 @@ var sweeping := false
 var camera: Camera3D
 var engine_sfx: AudioStreamPlayer3D
 
-var max_speed := 9.0
+var max_speed := 7.0  # m/s (25 km/h) flat out; the mouse-wheel limiter caps it lower
 var accel := 4.2
 var brake := 9.0
 var wheelbase := 2.5
@@ -68,7 +68,7 @@ var _pitch_off := 0.0
 
 func _ready() -> void:
 	if kind == "charger":
-		max_speed = 11.0
+		max_speed = 8.5
 		accel = 5.0
 		drive_kw = 0.9
 		sweep_kw = 0.0
@@ -180,7 +180,8 @@ func _physics_process(dt: float) -> void:
 	var f := forward()
 	# Engine / brake. Pressing against the direction of travel brakes first, then reverses.
 	if throttle != 0.0 and (speed == 0.0 or signf(throttle) == signf(speed) or absf(speed) < 0.3):
-		var top := (top_speed() * (1.5 if boosting else 1.0)) if throttle > 0.0 else top_speed() * 0.45
+		# Shift boosts past the limiter; otherwise forward speed is capped by the wheel setting.
+		var top := (top_speed() * (1.35 if boosting else limit())) if throttle > 0.0 else top_speed() * 0.45
 		var headroom := clampf(1.0 - absf(speed) / top, 0.0, 1.0)
 		var motor_k := 0.5 + 0.5 * float(cond.motor)
 		speed += throttle * accel * motor_k * (1.4 if boosting else 1.0) * (0.35 + 0.65 * sqrt(headroom)) * dt
@@ -190,6 +191,9 @@ func _physics_process(dt: float) -> void:
 		speed = move_toward(speed, 0.0, (0.9 + absf(speed) * 0.08) * dt)  # rolling resistance + drag
 	if handbrake:
 		speed = move_toward(speed, 0.0, brake * 0.7 * dt)
+	# Scrolled the limiter down: ease off to the new cap instead of snapping to it.
+	if driving and not boosting and speed > top_speed() * limit():
+		speed = move_toward(speed, top_speed() * limit(), brake * 0.35 * dt)
 	# Slopes: gravity pulls along the ground's downhill direction.
 	var n := world.terrain.normal_at(global_position.x, global_position.z)
 	var downhill := Vector3(n.x, 0, n.z)
@@ -398,6 +402,22 @@ func _unhandled_input(e: InputEvent) -> void:
 	elif e.is_action_pressed("camera_toggle"):
 		cam_mode = 1 - cam_mode
 		snap_camera()
+	elif e is InputEventMouseButton and e.pressed and e.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		var st := world.state
+		var step := 0.1 if e.button_index == MOUSE_BUTTON_WHEEL_UP else -0.1
+		st.drive_limit = clampf(snappedf(st.drive_limit + step, 0.1), 0.2, 1.0)
+		world.hud.toast("Speed limit %d km/h  (%d%%)  ·  scroll to change, Shift to boost past it" % [
+			roundi(top_speed() * limit() * 3.6), roundi(st.drive_limit * 100.0)], 1.6)
+		get_viewport().set_input_as_handled()
+
+
+## Fraction of top speed the mouse-wheel limiter allows (the benchmark has no limiter).
+func limit() -> float:
+	return world.state.drive_limit if world.mode == "play" else 1.0
+
+
+func kmh() -> int:
+	return roundi(absf(speed) * 3.6)
 
 
 var lights_override := -1  # -1 automatic (on at night), 0 off, 1 on: set with L while driving
