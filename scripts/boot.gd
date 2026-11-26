@@ -117,9 +117,10 @@ func _debug_shot(path: String, delay: float, scene: String) -> void:
 			await get_tree().process_frame
 		Input.action_release("move_forward")
 		Input.action_release("sprint")
-	if scene == "rover" and current is World:
+	if (scene == "rover" or scene == "tracks") and current is World:
 		var w: World = current
 		w.state.sweeper_owned = true
+		w.sweeper.tool_on = scene != "tracks"
 		w._set_vehicle_present(w.sweeper, true)
 		w.sweeper.cond.tyres = 0.3
 		w.sweeper.cond.motor = 0.2
@@ -128,19 +129,26 @@ func _debug_shot(path: String, delay: float, scene: String) -> void:
 		w.player.set_active(false)
 		w.sweeper.set_driving(true)
 		Input.action_press("move_forward")
-		for i in 160:
-			if i == 60:
+		for i in (260 if scene == "tracks" else 160):
+			if i == 60 and scene != "tracks":
 				Input.action_press("move_left")
+			if i == 150 and scene == "tracks":
+				Input.action_press("move_right")
 			await get_tree().process_frame
 		Input.action_release("move_forward")
 		Input.action_release("move_left")
+		Input.action_release("move_right")
 		for i in 20:
 			await get_tree().process_frame
 		var cam := Camera3D.new()
 		w.add_child(cam)
 		var vp := w.sweeper.global_position
-		cam.global_position = vp + w.sweeper.right() * 4.2 + w.sweeper.forward() * 1.5 + Vector3(0, 1.1, 0)
-		cam.look_at(vp + Vector3(0, 0.6, 0))
+		if scene == "tracks":
+			cam.global_position = vp + w.sweeper.forward() * 3.0 + w.sweeper.right() * 3.0 + Vector3(0, 6.5, 0)
+			cam.look_at(vp - w.sweeper.forward() * 9.0)
+		else:
+			cam.global_position = vp + w.sweeper.right() * 4.2 + w.sweeper.forward() * 1.5 + Vector3(0, 1.1, 0)
+			cam.look_at(vp + Vector3(0, 0.6, 0))
 		cam.fov = 60.0
 		cam.current = true
 		w.hud.visible = false
