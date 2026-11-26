@@ -20,7 +20,7 @@ const BINDS := {
 	"D": ["both", "Right", "Steer", "Walk right / steer right"],
 	"Shift": ["both", "Sprint", "Boost", "Sprint / boost (faster, uses more battery per km)"],
 	"Space": ["both", "Jump", "Handbrake", "Jump; at a ledge, climb up / handbrake (drift)"],
-	"E": ["both", "Use", "Exit", "Interact: terminal, pods, plug, drive / get out"],
+	"E": ["both", "Use", "Exit", "Interact: terminal, pods, sacks, bunk, plug, drive / get out"],
 	"F": ["foot", "Clean", "", "Clean the rust you aim at (same as holding LMB)"],
 	"G": ["foot", "Kit", "", "Use a repair kit on the vehicle next to you"],
 	"B": ["foot", "Cell", "", "Install a battery cell in the vehicle next to you"],

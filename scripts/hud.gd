@@ -55,6 +55,33 @@ func _ready() -> void:
 	key_guide = KeyGuide.new()
 	key_guide.visible = false
 	root.add_child(key_guide)
+	_fader = ColorRect.new()
+	_fader.color = Color(0, 0, 0, 1)
+	_fader.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fader.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fader.modulate.a = 0.0
+	_fader.visible = false
+	_fader_lbl = UiKit.label("", 30, Color(0.8, 0.85, 1.0))
+	_fader_lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fader_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_fader_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_fader.add_child(_fader_lbl)
+	add_child(_fader)  # above everything, including the map and menus
+
+
+var _fader: ColorRect
+var _fader_lbl: Label
+
+
+## Fades the screen to black (alpha 1) or back (0) over `secs`, with an optional caption.
+func fade(alpha: float, secs: float, caption: String) -> void:
+	_fader.visible = true
+	if caption != "":
+		_fader_lbl.text = caption
+	var tw := create_tween()
+	tw.tween_property(_fader, "modulate:a", alpha, secs)
+	await tw.finished
+	_fader.visible = alpha > 0.0
 
 
 func _bar(color: Color) -> ProgressBar:
@@ -297,8 +324,8 @@ func _update_text() -> void:
 	batt_box.visible = v != null
 	if v:
 		var pct := v.energy / v.battery * 100.0
-		var kw := v.drive_kw + (v.sweep_kw if v.tool_on else 0.0) + 0.15
-		var range_km := v.energy / kw * GameState.TIME_SCALE * v.max_speed / 1000.0
+		# Range at the limiter's speed: scroll down and watch it grow.
+		var range_km := v.range_at(v.top_speed() * v.limit() * 3.6)
 		batt_lbl.text = "Battery %d%% · ~%.1f km · %d km/h%s%s" % [roundi(pct), range_km, v.kmh(),
 			" · BOOST" if v.boosting else " (limit %d)" % roundi(v.top_speed() * v.limit() * 3.6), " · charging" if v.charging else ""]
 		batt_bar.max_value = v.battery
@@ -601,6 +628,8 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 func toggle_pause() -> void:
+	if world.sleeping:
+		return
 	if world.placing:
 		world._end_placing()  # Esc cancels panel placement first
 		return

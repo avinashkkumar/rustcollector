@@ -13,6 +13,8 @@ const BAYS := [Vector3(-1.5, 0, 13.5), Vector3(5.5, 0, 13.5)]  # parking spots: 
 const POSTS := [Vector3(-1.5, 0, 8.3), Vector3(5.5, 0, 8.3)]  # charging posts at the back wall
 const SOLAR_ORIGIN := Vector3(-18, 0, -25)
 const DEPOT_DRIVE_R := 13.0  # a vehicle this close to the depot can export (the props crowd its east side)
+const BED := Vector3(2, 0, 8.75)  # the garage bunk, against the back wall between the bays
+const SLEEP_COST := 500  # ₹ for a night in the bunk (air, heat and water), x the difficulty's cost
 const SACK_REACH := 1.9  # metres: pick a sack up on foot
 const SACK_SCOOP := 2.6  # metres from the Sweeper's centre: its brush scoops a sack up
 
@@ -463,6 +465,7 @@ func _build_base() -> void:
 	add_child(chimney_fx)
 
 	_build_garage()
+	_build_bunk()
 	# Outside the roof's overhang (the roof reaches x + 7.3), so your head clears the eave.
 	_ladder(Vector3(GARAGE.x + 7.42, terrain.height_at(GARAGE.x + 7.42, GARAGE.z), GARAGE.z - 2.0), Vector3.RIGHT, 5.3)
 
@@ -683,6 +686,119 @@ func _panel_near(p: Vector3) -> int:
 
 
 ## Garage: back wall, side walls and roof, open to the south, with a charging post per bay.
+## A steel-framed bunk with a mattress, pillow and blanket, plus a reading lamp.
+func _build_bunk() -> void:
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color(0.32, 0.34, 0.37)
+	steel.metallic = 0.6
+	steel.roughness = 0.45
+	var cloth := StandardMaterial3D.new()
+	cloth.albedo_color = Color(0.86, 0.84, 0.8)
+	cloth.roughness = 1.0
+	var blanket := StandardMaterial3D.new()
+	blanket.albedo_color = Color(0.18, 0.27, 0.42)
+	blanket.roughness = 1.0
+	var bunk := Node3D.new()
+	bunk.position = Vector3(BED.x, terrain.height_at(BED.x, BED.z) + 0.1, BED.z)
+	add_child(bunk)
+	for part in [
+		[Vector3(1.0, 0.08, 2.1), Vector3(0, 0.38, 0), steel],  # base
+		[Vector3(0.06, 0.42, 0.06), Vector3(-0.47, 0.21, -1.02), steel], [Vector3(0.06, 0.42, 0.06), Vector3(0.47, 0.21, -1.02), steel],
+		[Vector3(0.06, 0.42, 0.06), Vector3(-0.47, 0.21, 1.02), steel], [Vector3(0.06, 0.42, 0.06), Vector3(0.47, 0.21, 1.02), steel],
+		[Vector3(1.0, 0.5, 0.06), Vector3(0, 0.62, -1.04), steel],  # headboard (wall side)
+		[Vector3(0.94, 0.16, 2.0), Vector3(0, 0.5, 0), cloth],  # mattress
+		[Vector3(0.6, 0.1, 0.32), Vector3(0, 0.63, -0.78), cloth],  # pillow
+		[Vector3(0.98, 0.06, 1.3), Vector3(0, 0.6, 0.33), blanket]]:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = part[0]
+		mi.mesh = bm
+		mi.position = part[1]
+		mi.material_override = part[2]
+		bunk.add_child(mi)
+	var body := StaticBody3D.new()
+	body.collision_layer = 4
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(1.0, 0.6, 2.1)
+	cs.shape = bs
+	cs.position.y = 0.3
+	body.add_child(cs)
+	bunk.add_child(body)
+	var lamp := OmniLight3D.new()
+	lamp.position = Vector3(0.45, 1.6, -1.0)
+	lamp.light_color = Color(1.0, 0.8, 0.55)
+	lamp.light_energy = 0.8
+	lamp.omni_range = 3.5
+	bunk.add_child(lamp)
+	var l := Label3D.new()
+	l.text = "Bunk  ·  sleep at night"
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.fixed_size = true
+	l.font_size = 22
+	l.pixel_size = 0.0011
+	l.outline_size = 8
+	l.modulate = Color(0.75, 0.85, 1.0)
+	l.position = Vector3(0, 1.5, -0.6)
+	bunk.add_child(l)
+
+
+# ---------------------------------------------------------------- sleeping
+
+var sleeping := false
+
+
+## Night runs from 17:15 to 05:15; you can only sleep then.
+func is_bedtime() -> bool:
+	return state.time_of_day >= 0.72 or state.time_of_day < 0.22
+
+
+func sleep_cost() -> float:
+	return roundf(SLEEP_COST * float(state.diff().cost) / 50.0) * 50.0
+
+
+static func clock(t: float) -> String:
+	var mins := int(t * 24.0 * 60.0) % (24 * 60)
+	return "%02d:%02d" % [mins / 60, mins % 60]
+
+
+## Pay for the bunk, fade out, run the night forward to 06:30 (plugged-in vehicles charge from
+## the base battery, the hauler still calls, the Sol report fires at midnight), then wake up.
+func go_to_sleep() -> void:
+	if sleeping or not is_bedtime():
+		return
+	var cost := sleep_cost()
+	if state.credits < cost:
+		hud.toast("A night in the bunk costs %s (air, heat and water). Export some rust first." % GameState.inr(cost), 3.5)
+		return
+	state.credits -= cost
+	sleeping = true
+	ui_open = true
+	player.set_torch(false)
+	await hud.fade(1.0, 1.4, "Sleeping...")
+	var wake := 0.27
+	var left := fposmod(wake - state.time_of_day, 1.0) * GameState.SOL_SECONDS
+	var steps := 96
+	for i in steps:
+		var dt := left / steps
+		_update_daycycle(dt)
+		_update_power(dt)
+		_update_hauler(dt)
+	state.time_of_day = wake
+	_sky_t = 0.0
+	_update_daycycle(0.0)
+	save_game()
+	await get_tree().create_timer(0.6).timeout
+	await hud.fade(0.0, 1.6, "")
+	ui_open = false
+	sleeping = false
+	var plugged_note := ""
+	for v in plugged.keys():
+		plugged_note += "  ·  %s %d%%" % [v.display_name(), roundi(v.energy / v.battery * 100.0)]
+	hud.toast("Good morning: Sol %d, %s. The bunk cost %s.%s" % [state.sol, clock(state.time_of_day), GameState.inr(cost), plugged_note], 5.0)
+	sfx("bell")
+
+
 func _build_garage() -> void:
 	var wall_m := StandardMaterial3D.new()
 	wall_m.albedo_color = Color(0.86, 0.86, 0.84)
@@ -824,12 +940,23 @@ func is_tethered(v: Vehicle) -> bool:
 # ---------------------------------------------------------------- audio
 
 func _setup_audio() -> void:
-	for n in ["impactMetal_002", "computerNoise_000", "computerNoise_002", "doorOpen_001", "laserSmall_000", "forceField_001", "thrusterFire_000"]:
+	for n in ["impactMetal_002", "doorOpen_001", "thrusterFire_000"]:
 		var p := AudioStreamPlayer.new()
 		p.stream = load("res://assets/sfx/%s.ogg" % n)
 		p.volume_db = -8.0
 		add_child(p)
 		_sfx[n] = p
+	# Synthesised, natural-sounding effects (no bleeps): see SoundBank.
+	for n in ["latch", "click", "ratchet", "sack", "bell"]:
+		var p := AudioStreamPlayer.new()
+		p.stream = SoundBank.make(n)
+		p.volume_db = -4.0 if n != "bell" else -7.0
+		add_child(p)
+		_sfx[n] = p
+	_pour = AudioStreamPlayer.new()
+	_pour.stream = SoundBank.make("pour")
+	_pour.volume_db = -10.0
+	add_child(_pour)
 	_clean_loop = AudioStreamPlayer.new()
 	var st: AudioStreamOggVorbis = load("res://assets/sfx/spaceEngineLow_000.ogg")
 	st.loop = true
@@ -843,9 +970,79 @@ func sfx(n: String) -> void:
 		_sfx[n].play()
 
 
+# ---------------------------------------------------------------- timed jobs (unloading takes time)
+
+var _pour: AudioStreamPlayer
+var _pouring := false  # set each frame by whatever is moving rust right now
+var task := {}  # {label, t, dur, done: Callable, who: Node3D, at: Vector3}
+
+const TASK_RATES := {tank = 15.0, cart = 40.0, hopper = 110.0, sack = 15.0}  # kg per second
+const TASK_MAX := {tank = 7.0, cart = 8.0, hopper = 10.0, sack = 6.0}  # seconds, at most
+const SCOOP_RATE := 150.0  # kg/s the Sweeper's brush lifts out of a sack
+
+
+## Seconds to move `kg` of rust by `how` (tank, cart, hopper or sack): a second to get set, then
+## the pour itself.
+static func task_time(how: String, kg: float) -> float:
+	return minf(1.0 + kg / float(TASK_RATES[how]), float(TASK_MAX[how]))
+
+
+func busy() -> bool:
+	return not task.is_empty()
+
+
+## Starts a job that runs `done` after `dur` seconds unless `who` (the player or a vehicle) moves.
+func start_task(label: String, dur: float, who: Node3D, done: Callable) -> void:
+	if busy():
+		return
+	task = {label = label, t = 0.0, dur = dur, done = done, who = who, at = who.global_position}
+
+
+func cancel_task(why := "") -> void:
+	if not busy():
+		return
+	task = {}
+	if why != "":
+		hud.toast(why, 2.0)
+
+
+func _update_task(dt: float) -> void:
+	if busy():
+		var who: Node3D = task.who
+		var moved := _flat_dist(who.global_position, task.at) > 0.7
+		if who is Vehicle and (absf((who as Vehicle).speed) > 0.8 or driven() != who):
+			moved = true
+		if who == player and not player.active:
+			moved = true
+		if moved:
+			cancel_task("Stopped: %s. Stand still until it finishes." % String(task.label).to_lower())
+		else:
+			task.t += dt
+			_pouring = true
+			if task.t >= task.dur:
+				var done: Callable = task.done
+				task = {}
+				done.call()
+				sfx("latch")
+	if _pouring and mode == "play":
+		if not _pour.playing:
+			_pour.play()
+	elif _pour.playing:
+		_pour.stop()
+	_pouring = false
+
+
+func task_prompt() -> String:
+	var f := clampf(task.t / task.dur, 0.0, 1.0)
+	var bars := roundi(f * 20.0)
+	return "%s  %s%s  %d%%   ·  moving cancels" % [task.label, "|".repeat(bars), ".".repeat(20 - bars), roundi(f * 100.0)]
+
+
 # ---------------------------------------------------------------- cleaning (every cleaner yields rust)
 
 func player_clean(pos: Vector3, tool: Dictionary, dt: float) -> bool:
+	if busy():
+		return false
 	var free := state.capacity() - state.tank
 	if free <= 0.01:
 		_warn("Rust tank full! Export it at the depot, tip it into your handcart (Q), or Q to drop a sack for the hauler.")
@@ -865,7 +1062,7 @@ func player_clean(pos: Vector3, tool: Dictionary, dt: float) -> bool:
 		var lv := state.mastery_level()
 		hud.toast("%s mastery %s  ·  +%d%% speed  ·  upgrades up to level %d unlocked" % [
 			tool.name, "★".repeat(lv), roundi(lv * GameState.MASTERY_BONUS * 100.0), lv], 5.0, Color(1.0, 0.85, 0.35))
-		sfx("forceField_001")
+		sfx("bell")
 	state.tank = minf(state.tank + kg, state.capacity())
 	state.collected += kg
 	state.sol_kg.you += kg
@@ -928,7 +1125,7 @@ func _dig(kg: float) -> void:
 	state.earned += found.value
 	hud.toast("Found under the rust: %s  +%s   (relics %d/%d)" % [found.name, GameState.inr(found.value),
 		state.relics_found.size(), GameState.RELICS.size()], 5.0, Color(1.0, 0.85, 0.4))
-	sfx("laserSmall_000")
+	sfx("bell")
 
 
 func vehicle_broken(v: Vehicle) -> void:
@@ -976,18 +1173,25 @@ func empty_hopper() -> void:
 	if state.hopper <= 0.05:
 		hud.toast("Hopper is already empty.", 2.0)
 		return
+	if busy():
+		return
+	var kg := state.hopper
+	if absf(sweeper.speed) > 0.8:
+		hud.toast("Stop the Sweeper to empty the hopper.", 2.0)
+		return
 	if _flat_dist(sweeper.global_position, DEPOT) < DEPOT_DRIVE_R:
-		var c := state.sell(state.hopper)
-		hud.toast("Exported %.0f kg from the hopper  ->  +%s" % [state.hopper, GameState.inr(c)], 3.0)
-		sfx("computerNoise_000")
+		start_task("Tipping %.0f kg into the depot" % kg, task_time("hopper", kg), sweeper, func():
+			var c := state.sell(state.hopper)
+			hud.toast("Exported %.0f kg from the hopper  ->  +%s" % [state.hopper, GameState.inr(c)], 3.0)
+			state.hopper = 0.0)
 	else:
-		# Behind the Sweeper, so the brush (at the front) does not scoop it straight back up.
-		var back := sweeper.global_position - sweeper.forward() * 3.6
-		_drop_sack(back, state.hopper)
-		hud.toast("Bagged %.0f kg into a rust sack. Scoop it up later with the brush, carry it (E), or leave it for the hauler (%d%% fee)." % [
-			state.hopper, roundi(state.haul_fee() * 100.0)], 4.5)
-		sfx("impactMetal_002")
-	state.hopper = 0.0
+		start_task("Bagging %.0f kg into a sack" % kg, task_time("hopper", kg), sweeper, func():
+			# Behind the Sweeper, so the brush (at the front) does not scoop it straight back up.
+			_drop_sack(sweeper.global_position - sweeper.forward() * 3.6, state.hopper)
+			hud.toast("Bagged %.0f kg into a rust sack. Scoop it up later with the brush, carry it (E), or leave it for the hauler (%d%% fee)." % [
+				state.hopper, roundi(state.haul_fee() * 100.0)], 4.5)
+			state.hopper = 0.0
+			sfx("sack"))
 
 
 # ---------------------------------------------------------------- hexagons and drones
@@ -1037,7 +1241,7 @@ func _poll_hexes() -> void:
 			state.credits += bonus
 			state.earned += bonus
 			hud.toast("HEXAGON %s CLEARED  ·  bonus +%s" % [hn, GameState.inr(bonus)], 5.0, Color(1.0, 0.85, 0.35))
-			sfx("laserSmall_000")
+			sfx("bell")
 		elif c >= 0.5 and not _hex_half.has(k):
 			_hex_half[k] = true
 			hud.toast("Hexagon %s is half clean  ·  %s bonus at 90%%" % [hn, GameState.inr(bonus)], 3.5)
@@ -1068,22 +1272,26 @@ func unload_tank() -> void:
 	if state.tank < 0.5:
 		_warn("Your rust tank is empty.")
 		return
+	if busy():
+		return
 	if cart and _flat_dist(player.global_position, cart.global_position) < 3.2:
-		var put := cart.add(state.tank)
-		state.tank -= put
-		if put <= 0.0:
+		if cart.space() <= 0.5:
 			hud.toast("The handcart is full. Push it to the export depot.", 2.5)
-		else:
-			hud.toast("Tipped %.0f kg into the handcart (%.0f / %.0f kg)." % [put, cart.load_kg, cart.capacity()], 2.0)
-			sfx("impactMetal_002")
+			return
+		var kg := minf(state.tank, cart.space())
+		start_task("Tipping %.0f kg into the handcart" % kg, task_time("tank", kg), player, func():
+			var put := cart.add(state.tank)
+			state.tank -= put
+			hud.toast("Tipped %.0f kg into the handcart (%.0f / %.0f kg)." % [put, cart.load_kg, cart.capacity()], 2.0))
 		return
 	if _flat_dist(player.global_position, DEPOT) < 6.5:
 		return  # at the depot E exports at full price
-	_drop_sack(player.global_position - Vector3(sin(player.yaw), 0, cos(player.yaw)) * 0.9, state.tank)
-	hud.toast("Dropped a %.0f kg rust sack. The hauler collects sacks every %d min (%d%% haulage fee)." % [
-		state.tank, roundi(GameState.HAUL_INTERVAL / 60.0), roundi(state.haul_fee() * 100.0)], 4.0)
-	state.tank = 0.0
-	sfx("impactMetal_002")
+	start_task("Filling a sack with %.0f kg" % state.tank, task_time("tank", state.tank), player, func():
+		_drop_sack(player.global_position - Vector3(sin(player.yaw), 0, cos(player.yaw)) * 0.9, state.tank)
+		hud.toast("Dropped a %.0f kg rust sack. The hauler collects sacks every %d min (%d%% haulage fee)." % [
+			state.tank, roundi(GameState.HAUL_INTERVAL / 60.0), roundi(state.haul_fee() * 100.0)], 4.0)
+		state.tank = 0.0
+		sfx("sack"))
 
 
 func _drop_sack(at: Vector3, kg: float) -> void:
@@ -1119,8 +1327,21 @@ func take_from_sack(i: int, kg: float) -> float:
 	return got
 
 
-## On foot: lift sack `i` into the handcart if it is beside you, otherwise into your tank.
+## On foot: empty sack `i` into the handcart if it is beside you, otherwise into your tank. Takes
+## a few seconds; moving away cancels.
 func pick_up_sack(i: int) -> void:
+	if busy():
+		return
+	var into_cart := cart and (cart.pushing or _flat_dist(player.global_position, cart.global_position) < 3.2) and cart.space() > 0.5
+	var kg := minf(float(state.sacks[i][3]), cart.space() if into_cart else state.capacity() - state.tank)
+	var sack: Node3D = _sack_nodes[i]
+	start_task("Emptying the sack into your %s" % ("handcart" if into_cart else "tank"), task_time("sack", kg), player, func():
+		var j := _sack_nodes.find(sack)
+		if j >= 0:
+			_take_sack(j))
+
+
+func _take_sack(i: int) -> void:
 	var kg := float(state.sacks[i][3])
 	if cart and (cart.pushing or _flat_dist(player.global_position, cart.global_position) < 3.2) and cart.space() > 0.5:
 		var put := take_from_sack(i, cart.space())
@@ -1132,21 +1353,24 @@ func pick_up_sack(i: int) -> void:
 		state.tank += put
 		hud.toast("Emptied %.0f kg into your tank (%.0f / %.0f kg)%s." % [put, state.tank, state.capacity(),
 			"" if put >= kg - 0.05 else ", the rest stays in the sack"], 2.5)
-	sfx("impactMetal_002")
 
 
 ## The Sweeper's brush scoops up any sack it drives over, as far as the hopper has room.
-func _sweeper_scoop() -> void:
+## Lifting takes time: park over the sack (or crawl across it) until it is gone.
+func _sweeper_scoop(dt: float) -> void:
 	if driven() != sweeper or not sweeper.tool_on or state.hopper >= GameState.SWEEPER_HOPPER - 0.5:
 		return
 	var front := sweeper.global_position + sweeper.forward() * 1.2
 	var i := sack_near(front, SACK_SCOOP)
 	if i < 0:
 		return
-	var got := take_from_sack(i, GameState.SWEEPER_HOPPER - state.hopper)
+	var last := float(state.sacks[i][3]) <= SCOOP_RATE * dt
+	var got := take_from_sack(i, minf(SCOOP_RATE * dt, GameState.SWEEPER_HOPPER - state.hopper))
 	state.hopper += got
-	hud.toast("Scooped up a %.0f kg rust sack (hopper %.0f / %.0f kg)." % [got, state.hopper, GameState.SWEEPER_HOPPER], 2.0)
-	sfx("impactMetal_002")
+	_pouring = true
+	if last:
+		hud.toast("Scooped up the sack (hopper %.0f / %.0f kg)." % [state.hopper, GameState.SWEEPER_HOPPER], 2.0)
+		sfx("latch")
 
 
 ## Bigger loads make bigger sacks; the label shows the weight.
@@ -1271,10 +1495,10 @@ func _process(dt: float) -> void:
 			if r > _last_rank:
 				_last_rank = r
 				hud.toast("RANK UP: %s  ·  exports now pay +%d%%" % [state.rank_name(), roundi(r * GameState.RANK_BONUS * 100.0)], 6.0, Color(1.0, 0.85, 0.35))
-				sfx("forceField_001")
+				sfx("bell")
 			for m in missions.check(state):
 				hud.mission_complete(m)
-				sfx("laserSmall_000")
+				sfx("bell")
 	_update_labels()
 	if mode != "play":
 		return
@@ -1288,7 +1512,8 @@ func _process(dt: float) -> void:
 		_clean_loop.stop()
 	_update_pods(dt)
 	_update_hauler(dt)
-	_sweeper_scoop()
+	_sweeper_scoop(dt)
+	_update_task(dt)
 	_update_interaction()
 	_autosave_t += dt
 	if _autosave_t > 60.0:
@@ -1321,10 +1546,11 @@ func _update_daycycle(dt: float) -> void:
 		l.light_energy = lerpf(3.0, 1.2, day)
 	var night := 1.0 - day
 	# Once per evening, remind the player about the torch if it is off.
-	if night > 0.45 and not _dark_hinted:
+	if night > 0.45 and not _dark_hinted and not sleeping:
 		_dark_hinted = true
-		if not player.torch_on and player.active:
-			hud.toast("It's getting dark. Press L for your torch.", 5.0)
+		if player.active:
+			hud.toast("It's getting dark. %sOr sleep through the night in the garage bunk (%s)." % [
+				"" if player.torch_on else "Press L for your torch. ", GameState.inr(sleep_cost())], 6.0)
 	elif night < 0.2:
 		_dark_hinted = false
 	for v in [sweeper, charger]:
@@ -1404,6 +1630,9 @@ func _update_interaction() -> void:
 	var prompt := ""
 	_act = ""
 	_act_vehicle = null
+	if busy():
+		hud.set_prompt(task_prompt())
+		return
 	var v := driven()
 	if placing:
 		if v or not player.active:
@@ -1427,6 +1656,12 @@ func _update_interaction() -> void:
 		elif _panel_near(p) >= 0:
 			prompt = "[E] Pick up this solar panel (to move it)"
 			_act = "panel_pickup"
+		elif _flat_dist(p, BED) < 2.0:
+			if is_bedtime():
+				prompt = "[E] Sleep until 06:30  (%s for the night)" % GameState.inr(sleep_cost())
+				_act = "sleep"
+			else:
+				prompt = "Bunk: you can sleep once it is dark (17:15 to 05:15). It is %s." % clock(state.time_of_day)
 		elif sack_near(p, SACK_REACH) >= 0 and _sack_prompt(sack_near(p, SACK_REACH)) != "":
 			prompt = _sack_prompt(sack_near(p, SACK_REACH))
 			_act = "sack_pickup"
@@ -1518,7 +1753,7 @@ func _unhandled_input(e: InputEvent) -> void:
 	elif e.is_action_pressed("vehicle_tool") and driven() == sweeper:
 		sweeper.tool_on = not sweeper.tool_on
 		hud.toast("Brush %s" % ("ON" if sweeper.tool_on else "OFF"), 1.5)
-		sfx("forceField_001")
+		sfx("click")
 	elif e.is_action_pressed("vehicle_empty") and driven() == sweeper:
 		empty_hopper()
 	elif e.is_action_pressed("vehicle_empty") and player.active:
@@ -1531,7 +1766,7 @@ func _unhandled_input(e: InputEvent) -> void:
 			hud.toast("Headlights %s." % ("on" if dv.headlights_lit() else "off"), 1.2)
 		elif player.active:
 			player.set_torch(not player.torch_on)
-		sfx("computerNoise_002")
+		sfx("click")
 	elif e.is_action_pressed("place_panel") and player.active:
 		toggle_placing()
 	elif placing and e.is_action_pressed("clean"):
@@ -1547,12 +1782,12 @@ func _unhandled_input(e: InputEvent) -> void:
 		_near_vehicle.flat_warned = false
 		_near_vehicle._update_wear_visuals()
 		hud.toast("Repair kit used on the %s %s." % [_near_vehicle.display_name(), str(GameState.PART_NAMES[worst[0]]).to_lower()], 3.0)
-		sfx("forceField_001")
+		sfx("ratchet")
 	elif e.is_action_pressed("use_cell") and _near_vehicle and player.active and state.battery_cells > 0:
 		_near_vehicle.energy = minf(_near_vehicle.energy + 10.0, _near_vehicle.battery)
 		state.battery_cells -= 1
 		hud.toast("Battery cell installed: +10 kWh for the %s." % _near_vehicle.display_name(), 3.0)
-		sfx("forceField_001")
+		sfx("latch")
 	elif e is InputEventMouseButton and e.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -1560,18 +1795,21 @@ func _unhandled_input(e: InputEvent) -> void:
 func _do_action() -> void:
 	match _act:
 		"export":
-			var kg := state.tank + _cart_at_depot()
-			if _cart_at_depot() > 0.0:
-				cart.empty()
-			var c := state.sell(kg)
-			hud.toast("Exported %.1f kg of rust  ->  +%s" % [kg, GameState.inr(c)], 3.0)
-			state.tank = 0.0
-			sfx("computerNoise_000")
+			var dur := minf(task_time("tank", state.tank) + (task_time("cart", _cart_at_depot()) if _cart_at_depot() > 0.0 else 0.0), 10.0)
+			start_task("Unloading %.0f kg at the depot" % (state.tank + _cart_at_depot()), dur, player, func():
+				var kg := state.tank + _cart_at_depot()
+				if _cart_at_depot() > 0.0:
+					cart.empty()
+				var c := state.sell(kg)
+				hud.toast("Exported %.1f kg of rust  ->  +%s" % [kg, GameState.inr(c)], 3.0)
+				state.tank = 0.0)
 		"shop":
 			hud.open_shop()
-			sfx("computerNoise_002")
+			sfx("click")
 		"open_pod":
 			_open_pod()
+		"sleep":
+			go_to_sleep()
 		"sack_pickup":
 			var si := sack_near(player.global_position, SACK_REACH)
 			if si >= 0:
@@ -1609,8 +1847,9 @@ func _do_action() -> void:
 			_act_vehicle.set_driving(true)
 			sfx("doorOpen_001")
 		"exit":
-			_exit_vehicle(driven())
-			sfx("doorOpen_001")
+			if driven():
+				_exit_vehicle(driven())
+				sfx("doorOpen_001")
 
 
 func _exit_vehicle(v: Vehicle) -> void:
@@ -1774,7 +2013,7 @@ func buy(item: String) -> bool:
 			v.heading = 0.0
 			v.rotation.y = 0.0
 			v.speed = 0.0
-	sfx("forceField_001")
+	sfx("latch")
 	return true
 
 
@@ -1809,7 +2048,7 @@ func _place_waypoint() -> void:
 		add_child(waypoint)
 	waypoint.global_position = pos
 	hud.toast("Waypoint set, %d m %s." % [roundi(_flat_dist(from, pos)), compass_word(pos - from)], 2.0)
-	sfx("computerNoise_002")
+	sfx("click")
 
 
 static func compass_word(d: Vector3) -> String:
@@ -1838,7 +2077,7 @@ func _update_pods(dt: float) -> void:
 	pod.target = Vector3(x, terrain.height_at(x, z), z)
 	add_child(pod)
 	hud.toast("Supply pod inbound: %d m %s of the base. Follow the orange beacon." % [roundi(d), compass_word(Vector3(x, 0, z))], 6.0, Color(1.0, 0.75, 0.4))
-	sfx("laserSmall_000")
+	sfx("bell")
 
 
 func _open_pod() -> void:

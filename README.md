@@ -35,6 +35,13 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
   sack behind you. Get it back by driving over it with the brush on, or on foot with **E** (into
   your tank, or into the handcart when it is beside you), then sell it at the depot at full price.
   Vehicles export from up to 13 m from the depot and drive on and off the base pad from any side.
+- **Unloading takes time:** exporting, tipping into the handcart, filling or emptying a sack and
+  emptying the Sweeper's hopper each take a few seconds (more rust, longer) with a progress bar in
+  the prompt. Walking off or driving away cancels it and keeps the rust where it was. The Sweeper
+  lifts a sack at 150 kg/s, so park over it (or crawl across it) until it is gone.
+- **Sleep:** the bunk in the garage (between the two bays) lets you sleep from 17:15 to 05:15 for
+  ₹500 a night (more on Hard, less on Relaxed). You wake at 06:30 the next sol; vehicles plugged in
+  at the posts charge from the base battery overnight, and the hauler still calls.
 - **Base terminal** has tabs: Tools, Gear, Power, Vehicles, Workshop, Drones, Paint.
 - **Power:** solar panels (bought, none at start) charge the base battery during the day. You
   place them yourself: **P** shows a preview where you aim (green = OK, red says why not), **R**
@@ -44,7 +51,11 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
 - **Vehicles** (bought, none at start) roll on Mars-rover style wheels (open aluminium drums,
   chevron grousers, curved spokes, rocker-bogie legs with per-wheel suspension):
   the *Sweeper* (roller brush + 900 kg hopper) and the *Charger cart*, a mobile battery whose
-  cable you connect to a stranded Sweeper by hand. Boosting drains the battery faster per km.
+  cable you connect to a stranded Sweeper by hand. Top speed is 25 km/h (Sweeper) and 31 km/h
+  (cart); the **mouse wheel** sets a speed limit from 20% to 100% (60% in a new world, saved per
+  world). Slower driving uses less battery per km (power grows with the square of speed and the
+  brush works on the ground it covers), so the HUD range grows as you scroll down. Shift boosts
+  past the limit at a much higher cost per km.
 - **Wear and tear:** tyres wear with distance (3x faster when boosting), the brush with sweeping,
   the motor with throttle, boost and crashes. Worn parts cost grip, speed, cleaning power and
   battery; a failed motor stops the vehicle. Grime builds up and a dying motor smokes. Repair parts
@@ -75,12 +86,12 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
 | Shift | sprint | A/D | steer |
 | Space | jump; at a ledge, climb up | Shift | boost (faster, much more power per km) |
 | LMB or F | clean | Space | handbrake |
-| E | interact (depot, terminal, vehicles) | R | brush / charge cable on-off |
+| E | interact (depot, terminal, vehicles, sacks, bunk) | R | brush / charge cable on-off |
 | M | big map | Q | empty hopper (export at depot, bag into a sack elsewhere) |
 | H | hexagon grid on/off | E | exit vehicle |
 | T | waypoint (T on it again removes it) | mouse | free look (recentres by itself) |
 | Q | tip tank into handcart, or drop a sack | L | headlights on/off |
-| P / R | place solar panel / rotate it | | |
+| P / R | place solar panel / rotate it | wheel | speed limit (20–100%) |
 | L | torch | | |
 | G / B | use repair kit / battery cell at a vehicle | V | chase / hood camera |
 | F3 | FPS counter | F1 | key guide (full keyboard map) |
