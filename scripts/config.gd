@@ -185,6 +185,7 @@ func _setup_input() -> void:
 	_key("interact", [KEY_E])
 	_key("pause", [KEY_ESCAPE])
 	_key("toggle_fps", [KEY_F3])
+	_key("key_guide", [KEY_F1])
 	_key("toggle_map", [KEY_M])
 	_key("toggle_hex", [KEY_H])
 	_key("vehicle_tool", [KEY_R])
