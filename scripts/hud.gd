@@ -445,7 +445,7 @@ func _refresh_shop() -> void:
 			var nb := s.boots_lvl + 1
 			_row("Servo boots  +%d%%" % int(((GameState.BOOTS[nb].mult if nb < GameState.BOOTS.size() else s.boots_mult()) - 1.0) * 100),
 				"Walk and sprint faster.", "boots")
-			shop_list.add_child(UiKit.label("Away from the depot, Q drops your tank as a sack. The hauler collects sacks every %d min for a %d%% fee." % [roundi(GameState.HAUL_INTERVAL / 60.0), roundi(s.haul_fee() * 100.0)], 14, UiKit.MUTED))
+			shop_list.add_child(UiKit.label("Away from the depot, Q drops your tank (or the Sweeper's hopper) as a sack. Pick sacks up with E or the Sweeper's brush, or the hauler collects them every %d min for a %d%% fee." % [roundi(GameState.HAUL_INTERVAL / 60.0), roundi(s.haul_fee() * 100.0)], 14, UiKit.MUTED))
 		"Power":
 			_row("Solar panel  (%d/%d installed)" % [s.panels, GameState.MAX_PANELS],
 				"+%.0f kW generation and +%.0f kWh of base battery. Vehicles charge from it at the garage posts." % [GameState.PANEL_KW, GameState.BANK_PER_PANEL], "panel")

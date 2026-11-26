@@ -184,41 +184,6 @@ func paint(pos: Vector3, radius_m: float, strength: float) -> float:
 	return kg
 
 
-## Puts rust back on the ground as a mound (used when a vehicle dumps its load).
-func deposit(pos: Vector3, kg: float) -> void:
-	var units := kg / KG_PER_UNIT
-	var radius := clampf(sqrt(kg) * 0.35, 1.2, 6.0)
-	var r := radius * PPM
-	var r2 := r * r
-	var gx := pos.x * PPM
-	var gy := pos.z * PPM
-	# Volume of a cone-shaped mound: sum of (1 - d/r) over the disc is ~ pi r^2 / 3.
-	var peak := units / (PI * r2 / 3.0)
-	for ky in range(floori((gy - r) / RES), floori((gy + r) / RES) + 1):
-		for kx in range(floori((gx - r) / RES), floori((gx + r) / RES) + 1):
-			var k := Vector2i(kx, ky)
-			var c := chunk(k)
-			# Take sole ownership so writes happen in place (packed arrays are copy-on-write;
-			# holding a second reference would copy all 64 KB on the first write).
-			var data: PackedByteArray = c.data
-			c.data = PackedByteArray()
-			var bx := kx * RES
-			var by := ky * RES
-			for y in range(maxi(floori(gy - r) - by, 0), mini(floori(gy + r) - by, RES - 1) + 1):
-				var dy := by + y + 0.5 - gy
-				for x in range(maxi(floori(gx - r) - bx, 0), mini(floori(gx + r) - bx, RES - 1) + 1):
-					var dx := bx + x + 0.5 - gx
-					var d2 := dx * dx + dy * dy
-					if d2 > r2:
-						continue
-					var i := y * RES + x
-					data[i] = mini(255, data[i] + int(peak * (1.0 - sqrt(d2) / r)))
-			c.data = data
-			c.modified = true
-			_dirty[k] = true
-	touched_hexes[hex_key(pos.x, pos.z)] = true
-
-
 func upload() -> void:
 	for k in _dirty:
 		var c: Dictionary = chunks[k]

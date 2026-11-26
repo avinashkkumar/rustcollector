@@ -31,6 +31,10 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
 - **Handcart:** push it (E) to where you work, tip your tank in (Q), push it back and export it
   with your tank at the depot. Away from the cart, **Q drops your tank as a rust sack**; the hauler
   collects sacks every 2 minutes for a fee (10 / 25 / 40% by difficulty).
+- **Rust sacks keep every kilogram.** In the Sweeper, Q away from the depot bags the hopper into a
+  sack behind you. Get it back by driving over it with the brush on, or on foot with **E** (into
+  your tank, or into the handcart when it is beside you), then sell it at the depot at full price.
+  Vehicles export from up to 13 m from the depot and drive on and off the base pad from any side.
 - **Base terminal** has tabs: Tools, Gear, Power, Vehicles, Workshop, Drones, Paint.
 - **Power:** solar panels (bought, none at start) charge the base battery during the day. You
   place them yourself: **P** shows a preview where you aim (green = OK, red says why not), **R**
@@ -72,7 +76,7 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
 | Space | jump; at a ledge, climb up | Shift | boost (faster, much more power per km) |
 | LMB or F | clean | Space | handbrake |
 | E | interact (depot, terminal, vehicles) | R | brush / charge cable on-off |
-| M | big map | Q | empty hopper (export at depot, dump elsewhere) |
+| M | big map | Q | empty hopper (export at depot, bag into a sack elsewhere) |
 | H | hexagon grid on/off | E | exit vehicle |
 | T | waypoint (T on it again removes it) | mouse | free look (recentres by itself) |
 | Q | tip tank into handcart, or drop a sack | L | headlights on/off |

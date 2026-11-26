@@ -24,7 +24,7 @@ const BINDS := {
 	"F": ["foot", "Clean", "", "Clean the rust you aim at (same as holding LMB)"],
 	"G": ["foot", "Kit", "", "Use a repair kit on the vehicle next to you"],
 	"B": ["foot", "Cell", "", "Install a battery cell in the vehicle next to you"],
-	"Q": ["both", "Unload", "Empty", "Tip tank into handcart, or drop a sack / Empty the hopper (sells it at the depot)"],
+	"Q": ["both", "Unload", "Empty", "Tip tank into handcart, or drop a sack / Export the hopper at the depot, or bag it into a sack"],
 	"R": ["both", "Rotate", "Brush", "Rotate the panel you are placing / Sweeper brush on / off"],
 	"P": ["foot", "Panel", "", "Place a bought solar panel (R rotates, LMB places)"],
 	"V": ["drive", "", "Cam", "Chase / hood camera"],

@@ -12,6 +12,9 @@ const GARAGE := Vector3(2, 0, 13)  # open to the south (+z)
 const BAYS := [Vector3(-1.5, 0, 13.5), Vector3(5.5, 0, 13.5)]  # parking spots: sweeper, charger
 const POSTS := [Vector3(-1.5, 0, 8.3), Vector3(5.5, 0, 8.3)]  # charging posts at the back wall
 const SOLAR_ORIGIN := Vector3(-18, 0, -25)
+const DEPOT_DRIVE_R := 13.0  # a vehicle this close to the depot can export (the props crowd its east side)
+const SACK_REACH := 1.9  # metres: pick a sack up on foot
+const SACK_SCOOP := 2.6  # metres from the Sweeper's centre: its brush scoops a sack up
 
 var mode := "play"
 var seed_value := 4242
@@ -418,11 +421,19 @@ func _build_base() -> void:
 	add_child(pad)
 	var pad_body := StaticBody3D.new()
 	pad_body.collision_layer = 4
+	# Collide with a bevelled slab: a 1 m ramp all round lets vehicles (whose bodies cannot step
+	# up) drive on and off the pad; its vertical edge used to stop them dead.
 	var pcs := CollisionShape3D.new()
-	var pbox := BoxShape3D.new()
-	pbox.size = pm.size
-	pcs.shape = pbox
-	pad_body.position = pad.position
+	var slab := ConvexPolygonShape3D.new()
+	var top_h := pm.size.x * 0.5
+	var top_y := pad.position.y + pm.size.y * 0.5
+	var pts := PackedVector3Array()
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			pts.append(Vector3(sx * top_h, top_y, sz * top_h))
+			pts.append(Vector3(sx * (top_h + 1.2), -0.25, sz * (top_h + 1.2)))
+	slab.points = pts
+	pcs.shape = slab
 	pad_body.add_child(pcs)
 	add_child(pad_body)
 
@@ -867,7 +878,7 @@ func player_clean(pos: Vector3, tool: Dictionary, dt: float) -> bool:
 
 func vehicle_clean(_v: Vehicle, pos: Vector3, radius: float, strength: float) -> void:
 	if mode == "play" and state.hopper >= GameState.SWEEPER_HOPPER:
-		_warn("Sweeper hopper full! Press Q at the export depot, or Q anywhere to dump it.")
+		_warn("Sweeper hopper full! Press Q at the export depot, or Q anywhere to bag it into a sack.")
 		return
 	var cf := GameState.crust_factor(GameState.SWEEPER_TIER, state.crust_at(pos.x, pos.z))
 	if cf < 1.0 and mode == "play":
@@ -958,19 +969,23 @@ func _warn(msg: String) -> void:
 		_toast_cd = 4.0
 
 
-## Q in the sweeper: export at the depot, otherwise dump the load back onto the ground.
+## Q in the sweeper: export at the depot, otherwise bag the load into a sack behind the Sweeper.
+## The sack keeps every kilogram: drive over it with the brush on to scoop it back up, pick it up
+## on foot (E), or leave it for the hauler.
 func empty_hopper() -> void:
 	if state.hopper <= 0.05:
 		hud.toast("Hopper is already empty.", 2.0)
 		return
-	if _flat_dist(sweeper.global_position, DEPOT) < 11.0:
+	if _flat_dist(sweeper.global_position, DEPOT) < DEPOT_DRIVE_R:
 		var c := state.sell(state.hopper)
 		hud.toast("Exported %.0f kg from the hopper  ->  +%s" % [state.hopper, GameState.inr(c)], 3.0)
 		sfx("computerNoise_000")
 	else:
-		var back := sweeper.global_position - sweeper.forward() * 3.5
-		rust.deposit(back, state.hopper)
-		hud.toast("Dumped %.0f kg of rust on the ground. (Export it at the depot for ₹.)" % state.hopper, 3.5)
+		# Behind the Sweeper, so the brush (at the front) does not scoop it straight back up.
+		var back := sweeper.global_position - sweeper.forward() * 3.6
+		_drop_sack(back, state.hopper)
+		hud.toast("Bagged %.0f kg into a rust sack. Scoop it up later with the brush, carry it (E), or leave it for the hauler (%d%% fee)." % [
+			state.hopper, roundi(state.haul_fee() * 100.0)], 4.5)
 		sfx("impactMetal_002")
 	state.hopper = 0.0
 
@@ -1064,20 +1079,92 @@ func unload_tank() -> void:
 		return
 	if _flat_dist(player.global_position, DEPOT) < 6.5:
 		return  # at the depot E exports at full price
-	var p := player.global_position - Vector3(sin(player.yaw), 0, cos(player.yaw)) * 0.9
-	p.y = terrain.height_at(p.x, p.z)
-	state.sacks.append([p.x, p.y, p.z, state.tank])
-	_sack_nodes.append(_make_sack(p, state.tank))
+	_drop_sack(player.global_position - Vector3(sin(player.yaw), 0, cos(player.yaw)) * 0.9, state.tank)
 	hud.toast("Dropped a %.0f kg rust sack. The hauler collects sacks every %d min (%d%% haulage fee)." % [
 		state.tank, roundi(GameState.HAUL_INTERVAL / 60.0), roundi(state.haul_fee() * 100.0)], 4.0)
 	state.tank = 0.0
 	sfx("impactMetal_002")
 
 
+func _drop_sack(at: Vector3, kg: float) -> void:
+	var p := Vector3(at.x, terrain.height_at(at.x, at.z), at.z)
+	state.sacks.append([p.x, p.y, p.z, kg])
+	_sack_nodes.append(_make_sack(p, kg))
+
+
+## Index of the closest sack within `reach` metres of `p`, or -1.
+func sack_near(p: Vector3, reach: float) -> int:
+	var best := -1
+	var bd := reach
+	for i in state.sacks.size():
+		var sk: Array = state.sacks[i]
+		var d := Vector2(float(sk[0]) - p.x, float(sk[2]) - p.z).length()
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+## Takes up to `kg` out of sack `i` (removing it once empty); returns how much came out.
+func take_from_sack(i: int, kg: float) -> float:
+	var sk: Array = state.sacks[i]
+	var got := minf(kg, float(sk[3]))
+	sk[3] = float(sk[3]) - got
+	if float(sk[3]) < 0.05:
+		_sack_nodes[i].queue_free()
+		_sack_nodes.remove_at(i)
+		state.sacks.remove_at(i)
+	else:
+		_size_sack(_sack_nodes[i], float(sk[3]))
+	return got
+
+
+## On foot: lift sack `i` into the handcart if it is beside you, otherwise into your tank.
+func pick_up_sack(i: int) -> void:
+	var kg := float(state.sacks[i][3])
+	if cart and (cart.pushing or _flat_dist(player.global_position, cart.global_position) < 3.2) and cart.space() > 0.5:
+		var put := take_from_sack(i, cart.space())
+		cart.add(put)
+		hud.toast("Loaded %.0f kg into the handcart (%.0f / %.0f kg)%s." % [put, cart.load_kg, cart.capacity(),
+			"" if put >= kg - 0.05 else ", the rest stays in the sack"], 2.5)
+	else:
+		var put := take_from_sack(i, state.capacity() - state.tank)
+		state.tank += put
+		hud.toast("Emptied %.0f kg into your tank (%.0f / %.0f kg)%s." % [put, state.tank, state.capacity(),
+			"" if put >= kg - 0.05 else ", the rest stays in the sack"], 2.5)
+	sfx("impactMetal_002")
+
+
+## The Sweeper's brush scoops up any sack it drives over, as far as the hopper has room.
+func _sweeper_scoop() -> void:
+	if driven() != sweeper or not sweeper.tool_on or state.hopper >= GameState.SWEEPER_HOPPER - 0.5:
+		return
+	var front := sweeper.global_position + sweeper.forward() * 1.2
+	var i := sack_near(front, SACK_SCOOP)
+	if i < 0:
+		return
+	var got := take_from_sack(i, GameState.SWEEPER_HOPPER - state.hopper)
+	state.hopper += got
+	hud.toast("Scooped up a %.0f kg rust sack (hopper %.0f / %.0f kg)." % [got, state.hopper, GameState.SWEEPER_HOPPER], 2.0)
+	sfx("impactMetal_002")
+
+
+## Bigger loads make bigger sacks; the label shows the weight.
+func _size_sack(n: Node3D, kg: float) -> void:
+	var k := clampf(pow(maxf(kg, 1.0) / 30.0, 1.0 / 3.0), 0.75, 2.4)
+	(n.get_meta("bag") as Node3D).scale = Vector3.ONE * k
+	var l := n.get_meta("label") as Label3D
+	l.text = "Rust sack  %.0f kg" % kg
+	l.position.y = 0.95 * k + 0.1
+
+
 func _make_sack(p: Vector3, kg: float) -> Node3D:
 	var n := Node3D.new()
 	add_child(n)
 	n.global_position = p
+	var bag := Node3D.new()
+	n.add_child(bag)
+	n.set_meta("bag", bag)
 	var mi := MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = 0.36
@@ -1091,7 +1178,7 @@ func _make_sack(p: Vector3, kg: float) -> Node3D:
 	m.albedo_color = Color(0.82, 0.72, 0.52)
 	m.roughness = 1.0
 	mi.material_override = m
-	n.add_child(mi)
+	bag.add_child(mi)
 	var tie := MeshInstance3D.new()
 	var tm := CylinderMesh.new()
 	tm.top_radius = 0.05
@@ -1100,16 +1187,16 @@ func _make_sack(p: Vector3, kg: float) -> Node3D:
 	tie.mesh = tm
 	tie.position.y = 0.64
 	tie.material_override = m
-	n.add_child(tie)
+	bag.add_child(tie)
 	var l := Label3D.new()
-	l.text = "Rust sack  %.0f kg" % kg
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	l.fixed_size = true
 	l.font_size = 22
 	l.pixel_size = 0.0011
 	l.outline_size = 8
-	l.position.y = 0.95
 	n.add_child(l)
+	n.set_meta("label", l)
+	_size_sack(n, kg)
 	return n
 
 
@@ -1201,6 +1288,7 @@ func _process(dt: float) -> void:
 		_clean_loop.stop()
 	_update_pods(dt)
 	_update_hauler(dt)
+	_sweeper_scoop()
 	_update_interaction()
 	_autosave_t += dt
 	if _autosave_t > 60.0:
@@ -1339,6 +1427,9 @@ func _update_interaction() -> void:
 		elif _panel_near(p) >= 0:
 			prompt = "[E] Pick up this solar panel (to move it)"
 			_act = "panel_pickup"
+		elif sack_near(p, SACK_REACH) >= 0 and _sack_prompt(sack_near(p, SACK_REACH)) != "":
+			prompt = _sack_prompt(sack_near(p, SACK_REACH))
+			_act = "sack_pickup"
 		elif cart and cart.pushing:
 			prompt = "[E] Let go of the handcart  (%.0f / %.0f kg)" % [cart.load_kg, cart.capacity()]
 			_act = "cart_release"
@@ -1371,12 +1462,23 @@ func _update_interaction() -> void:
 						break
 	else:
 		# Controls are in the hint bar; the prompt only shows what this spot offers.
-		if v == sweeper and _flat_dist(v.global_position, DEPOT) < 11.0 and state.hopper > 0.05:
+		if v == sweeper and _flat_dist(v.global_position, DEPOT) < DEPOT_DRIVE_R and state.hopper > 0.05:
 			prompt = "[Q] Export the hopper here: %.0f kg  (+%s)" % [state.hopper, GameState.inr(state.hopper * state.price_now())]
 		elif bay_of(v) >= 0 and absf(v.speed) < 0.5:
 			prompt = "[E] Get out, then plug in at the charging post"
 		_act = "exit"
 	hud.set_prompt(prompt)
+
+
+## "[E] ..." for the sack at index i, or "" when neither the handcart nor your tank has room.
+func _sack_prompt(i: int) -> String:
+	var kg := float(state.sacks[i][3])
+	if cart and (cart.pushing or _flat_dist(player.global_position, cart.global_position) < 3.2) and cart.space() > 0.5:
+		return "[E] Load the %.0f kg rust sack into the handcart  (%.0f kg free)" % [kg, cart.space()]
+	var room := state.capacity() - state.tank
+	if room > 0.5:
+		return "[E] Pick up the %.0f kg rust sack into your tank  (%.0f kg free)" % [kg, room]
+	return ""
 
 
 ## Prompts for the garage posts and the charger cart cable. Sets _act when actionable.
@@ -1470,6 +1572,10 @@ func _do_action() -> void:
 			sfx("computerNoise_002")
 		"open_pod":
 			_open_pod()
+		"sack_pickup":
+			var si := sack_near(player.global_position, SACK_REACH)
+			if si >= 0:
+				pick_up_sack(si)
 		"panel_pickup":
 			var i := _panel_near(player.global_position)
 			if i >= 0:
