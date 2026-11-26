@@ -22,6 +22,7 @@ func run() -> void:
 	await _torch_flow()
 	await _infra_flow()
 	await _panel_flow()
+	await _speed_flow()
 	await _depot_drive_flow()
 	await _sack_flow()
 	await _save_flow()
@@ -759,6 +760,61 @@ func _depot_drive_flow() -> void:
 		check(best < 2.5, "Sweeper crosses the pad edge from %s (closest %.1f m to %s)" % [leg[0], best, leg[1]])
 		await _press("interact")
 		await _frames(10)
+
+
+func _wheel(up: bool, times: int) -> void:
+	for i in times:
+		var e := InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_WHEEL_UP if up else MOUSE_BUTTON_WHEEL_DOWN
+		e.pressed = true
+		Input.parse_input_event(e)
+		await _frames(2)
+
+
+## Holds full throttle for `seconds` and returns the top speed reached (km/h).
+func _top_kmh(v: Vehicle, seconds: float) -> float:
+	var top := 0.0
+	Input.action_press("move_forward")
+	var t := 0.0
+	while t < seconds:
+		await get_tree().physics_frame
+		t += 1.0 / Engine.physics_ticks_per_second
+		top = maxf(top, absf(v.speed) * 3.6)
+	Input.action_release("move_forward")
+	return top
+
+
+func _speed_flow() -> void:
+	print("[vehicle speed and the mouse-wheel limiter]")
+	var s := world.state
+	s.sweeper_owned = true
+	world._set_vehicle_present(world.sweeper, true)
+	var v := world.sweeper
+	v.energy = v.battery
+	for k in v.cond:
+		v.cond[k] = 1.0
+	_put_vehicle(v, Vector3(80, 0, -80), Vector3(80, 0, -400))
+	await _enter(v)
+	check(is_equal_approx(s.drive_limit, 0.6), "new worlds start at a 60%% limit (%d km/h)" % roundi(v.top_speed() * 0.6 * 3.6))
+	await _wheel(false, 10)
+	check(is_equal_approx(s.drive_limit, 0.2), "scrolling down bottoms out at 20%% (%.1f)" % s.drive_limit)
+	var slow := await _top_kmh(v, 5.0)
+	check(slow <= v.top_speed() * 0.2 * 3.6 + 0.5, "at 20%% the Sweeper stays under %d km/h (%.1f)" % [roundi(v.top_speed() * 0.2 * 3.6), slow])
+	check(world.hud.batt_lbl.text.contains("km/h"), "HUD shows the speed (%s)" % world.hud.batt_lbl.text)
+	await _wheel(true, 12)
+	check(is_equal_approx(s.drive_limit, 1.0), "scrolling up tops out at 100%")
+	var fast := await _top_kmh(v, 9.0)
+	check(fast > slow * 3.0 and fast <= 26.0, "flat out is %.1f km/h (was 32 before), well above the limited %.1f" % [fast, slow])
+	# Scroll down while moving: it eases off to the new limit.
+	Input.action_press("move_forward")
+	await _wheel(false, 6)
+	await get_tree().create_timer(3.0).timeout
+	var eased := absf(v.speed) * 3.6
+	Input.action_release("move_forward")
+	check(eased <= v.top_speed() * 0.4 * 3.6 + 0.5, "lowering the limit at speed slows you to it (%.1f km/h)" % eased)
+	s.drive_limit = 0.6
+	await _press("interact")
+	await _frames(10)
 
 
 func _sack_flow() -> void:
