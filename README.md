@@ -51,7 +51,7 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
 | H | hexagon grid on/off | E | exit vehicle |
 | T | waypoint (T on it again removes it) | mouse | free look (recentres by itself) |
 | G / B | use repair kit / battery cell at a vehicle | V | chase / hood camera |
-| F3 | FPS counter | F1 | show control hints |
+| F3 | FPS counter | F1 | key guide (full keyboard map) |
 | Esc | pause menu (settings, mission log) | | |
 
 ---

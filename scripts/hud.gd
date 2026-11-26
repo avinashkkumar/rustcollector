@@ -36,6 +36,7 @@ var _text_t := 0.0
 var _fps_frames := 0
 var _fps_t := 0.0
 var _map_big := false
+var key_guide: KeyGuide
 
 
 func _ready() -> void:
@@ -51,6 +52,9 @@ func _ready() -> void:
 	_build_center()
 	_build_shop()
 	_build_pause()
+	key_guide = KeyGuide.new()
+	key_guide.visible = false
+	root.add_child(key_guide)
 
 
 func _bar(color: Color) -> ProgressBar:
@@ -249,7 +253,15 @@ func _process(dt: float) -> void:
 		_fps_frames = 0
 		_fps_t = 0.0
 	if world.ui_open:
+		_text_t -= dt
+		if _text_t <= 0.0:
+			_text_t = 0.1
+			_update_text()  # balances must stay right while the terminal is open
 		return
+	if Input.is_action_just_pressed("key_guide"):
+		key_guide.driving = world.driven() != null
+		key_guide.visible = not key_guide.visible
+		key_guide.queue_redraw()
 	if Input.is_action_just_pressed("toggle_fps"):
 		Config.show_fps = not Config.show_fps
 		Config.save_settings()
@@ -322,12 +334,15 @@ func _update_text() -> void:
 	var mm := int(fmod(s.time_of_day * 1440.0, 60.0))
 	hex_lbl.text = "Hex %s · %d%% clean%s\nSol %d %02d:%02d · rust %s/kg" % [RustField.hex_name(hk), roundi(clean * 100.0),
 		" · bonus paid" if done else "", s.sol, hh, mm, GameState.inr(s.price_now())]
-	hint_lbl.visible = s.play_time < 180.0 or Input.is_key_pressed(KEY_F1)
+	hint_lbl.visible = s.play_time < 180.0
+	if key_guide.visible and key_guide.driving != (v != null):
+		key_guide.driving = v != null
+		key_guide.queue_redraw()
 	if v:
-		hint_lbl.text = "WASD drive · Shift boost · Space handbrake · mouse look · V camera · %sT waypoint · E exit · M map · Esc menu" % [
+		hint_lbl.text = "WASD drive · Shift boost · Space handbrake · mouse look · V camera · %sT waypoint · E exit · F1 all keys" % [
 			"R brush on/off · Q empty hopper · " if v == world.sweeper else ""]
 	else:
-		hint_lbl.text = "WASD move · Shift sprint · Space jump · LMB/F clean · E interact · T waypoint · M map · H hex grid · F1 help · Esc menu"
+		hint_lbl.text = "WASD move · Shift sprint · Space jump · LMB/F clean · E interact · T waypoint · M map · F1 all keys · Esc menu"
 
 
 static func _fmt_int(n: int) -> String:
@@ -453,7 +468,7 @@ func _row(title: String, desc: String, item: String) -> void:
 	if cost >= 0:
 		var b := UiKit.button(("Buy  %s" % GameState.inr(cost)) if cost > 0 else "Apply", func() -> void:
 			if world.buy(item):
-				toast("Purchased: %s" % title, 2.5)
+				toast(("Purchased: %s" if cost > 0 else "Applied: %s") % title, 2.5)
 			_refresh_shop(), 190)
 		b.disabled = world.state.credits < cost
 		hb.add_child(b)
@@ -531,6 +546,9 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 func toggle_pause() -> void:
+	if key_guide.visible:
+		key_guide.visible = false
+		return
 	if shop_layer.visible:
 		close_shop()
 		return
