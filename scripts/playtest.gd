@@ -20,6 +20,8 @@ func run() -> void:
 	await _progression_flow()
 	await _cart_flow()
 	await _torch_flow()
+	await _infra_flow()
+	await _panel_flow()
 	await _save_flow()
 	await _worlds_flow()
 	await _menu_flow()
@@ -237,6 +239,7 @@ func _worlds_flow() -> void:
 	var b := Worlds.create("Second colony", "777", "hard")
 	check(Worlds.read_meta(b).difficulty == "hard", "a world remembers its difficulty")
 	var c := Worlds.create("", "")
+	world.save_game()  # keep playing the first world after creating the others
 	check(Worlds.read_meta(c).name == "Colony 1", "blank name gets a default (%s)" % Worlds.read_meta(c).name)
 	check(Worlds.list().size() == 3, "three worlds listed")
 	check(Worlds.list()[0].id == a, "the world with progress is listed first")
@@ -438,12 +441,13 @@ func _cart_flow() -> void:
 	await _frames(3)
 	world.hud.close_shop()
 	check(world.cart != null and s.cart_lvl == 0, "buying it puts a handcart by the depot")
+	world.cart.place(Vector3(30, 0, 40), 0.0)  # open ground
 	await _stand_near(world.cart.global_position, Vector3(0, 0, 2.0), world.cart.global_position)
 	check(world._act == "cart_grab", "next to the cart: [E] push it")
 	await _press("interact")
 	check(world.cart.pushing, "E grabs the cart")
 	var start := world.cart.global_position
-	world.player.yaw = PI  # walk south, away from the base
+	world.player.yaw = 0.0  # walk north
 	Input.action_press("move_forward")
 	await get_tree().create_timer(2.0).timeout
 	Input.action_release("move_forward")
@@ -479,6 +483,145 @@ func _cart_flow() -> void:
 	var loaded := GameState.new()
 	loaded.load_into(RustField.new())
 	check(loaded.cart_lvl == 0, "the handcart is saved")
+
+
+func _hold(action: String, seconds: float) -> void:
+	Input.action_press(action)
+	await get_tree().create_timer(seconds).timeout
+	Input.action_release(action)
+	await _frames(3)
+
+
+func _infra_flow() -> void:
+	print("[buildings, climbing, fullscreen]")
+	var p := world.player
+	world.state.time_of_day = 0.35
+	# Garage ladder up to the roof.
+	var l: Dictionary = {}
+	for ld in world.ladders:
+		if (ld.base as Vector3).x > World.GARAGE.x + 7.0:
+			l = ld
+	await _stand_near(l.base + l.out * 1.2, Vector3.ZERO, l.base)
+	p.pitch = 0.0
+	Input.action_press("move_forward")
+	var t := 0.0
+	while t < 5.0 and p.global_position.y < 5.0:
+		await get_tree().create_timer(0.1).timeout
+		t += 0.1
+	await get_tree().create_timer(0.5).timeout
+	Input.action_release("move_forward")
+	await _frames(20)
+	check(p.global_position.y > 5.0 and p.is_on_floor(), "the garage ladder takes you onto the roof (feet at %.1f m)" % p.global_position.y)
+	# Hangar ladder: you end up standing on its curved roof.
+	var hl: Dictionary = world.ladders[0]
+	await _stand_near(hl.base + hl.out * 1.2, Vector3.ZERO, hl.base)
+	p.pitch = 0.0
+	Input.action_press("move_forward")
+	t = 0.0
+	while t < 5.0 and p.global_position.y < 4.0:
+		await get_tree().create_timer(0.1).timeout
+		t += 0.1
+	await get_tree().create_timer(0.3).timeout
+	Input.action_release("move_forward")
+	await _frames(20)
+	await get_tree().create_timer(1.0).timeout
+	var fl := "floor normal %s" % str(p.get_floor_normal()) if p.is_on_floor() else "not on floor, vel %s" % str(p.velocity)
+	check(p.global_position.y > 3.5 and p.is_on_floor(), "the hangar ladder puts you on its roof (feet at %.1f m, %s)" % [p.global_position.y, fl])
+	p.yaw += PI
+	p.pitch = -0.5
+	await _shot("11b_hangar_roof")
+	await _stand_near(l.base + l.out * 1.2, Vector3.ZERO, l.base)
+	Input.action_press("move_forward")
+	t = 0.0
+	while t < 5.0 and p.global_position.y < 5.0:
+		await get_tree().create_timer(0.1).timeout
+		t += 0.1
+	await get_tree().create_timer(0.5).timeout
+	Input.action_release("move_forward")
+	await _frames(10)
+	p.yaw += PI * 0.75
+	p.pitch = -0.4
+	await _shot("11a_on_garage_roof")
+	# Ledge climb onto the large barrel tank (2.4 m): jump, then Space again near the top.
+	var tank_pos := World.DEPOT + Vector3(4, 0, 6)
+	await _stand_near(tank_pos, Vector3(0, 0, 2.6), tank_pos)
+	var y0 := p.global_position.y
+	Input.action_press("move_forward")
+	await _press("jump")
+	var t2 := 0.0
+	while t2 < 1.5 and p.global_position.y - y0 < 1.8:
+		await get_tree().create_timer(0.05).timeout
+		t2 += 0.05
+	Input.action_release("move_forward")
+	await get_tree().create_timer(1.0).timeout
+	check(p.global_position.y - y0 > 1.8, "jump + climb gets you on top of a 2.4 m tank (+%.1f m)" % (p.global_position.y - y0))
+	check(p.is_on_floor(), "and you stand on its real surface (+%.1f m)" % (p.global_position.y - y0))
+	# Real shapes, not boxes: the round glass hangar is lower at its edge than its bounding box.
+	var space := p.get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(Vector3(11 + 4.6, 20, -12), Vector3(11 + 4.6, -1, -12), 4)
+	var hit := space.intersect_ray(q)
+	check(hit and hit.position.y < 3.9, "dome edge collides at its real height (%.2f m, box top would be 4.2)" % (hit.position.y if hit else -1.0))
+	# Fullscreen.
+	var ev := InputEventKey.new()
+	ev.keycode = KEY_F11
+	ev.pressed = true
+	var was := DisplayServer.window_get_mode()
+	Input.parse_input_event(ev)
+	await get_tree().create_timer(0.8).timeout
+	var now := DisplayServer.window_get_mode()
+	check(now != was, "F11 switches between windowed and fullscreen (%d -> %d)" % [was, now])
+	if now == DisplayServer.WINDOW_MODE_FULLSCREEN:
+		check(DisplayServer.window_get_size() == DisplayServer.screen_get_size(), "fullscreen covers the whole screen (%s)" % str(DisplayServer.window_get_size()))
+	Input.parse_input_event(ev)
+	await get_tree().create_timer(0.8).timeout
+	check(DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_FULLSCREEN, "F11 again goes back to a window")
+
+
+func _panel_flow() -> void:
+	print("[solar panels]")
+	var s := world.state
+	var p := world.player
+	s.panel_spots = []
+	world._refresh_solar()
+	s.panel_stock = 0
+	s.credits = 100000.0
+	var gen0 := s.gen_kw()
+	check(world.buy("panel") and s.panel_stock == 1 and s.panels == 0, "buying a panel puts it in your inventory, not on the ground")
+	check(is_equal_approx(s.gen_kw(), gen0), "an unplaced panel makes no power")
+	world.buy("panel")
+	# Aim at open ground near the base.
+	await _stand_near(Vector3(-20, 0, 20), Vector3.ZERO, Vector3(-20, 0, 30))
+	p.pitch = -0.45
+	await _press("place_panel")
+	await _frames(4)
+	check(world.placing and world._ghost.visible, "P shows a preview where you aim")
+	check(world._ghost_why == "", "open ground near the base is a valid spot (%s)" % world._ghost_why)
+	await _shot("12a_placing_valid")
+	await _press("vehicle_tool")
+	await _frames(3)
+	check(is_equal_approx(world._ghost_yaw, PI / 4.0), "R rotates the panel 45°")
+	await _press("clean")
+	check(s.panels == 1 and s.panel_stock == 1 and world.placing, "left-click places it; still placing the second one")
+	await _frames(4)
+	check(world._ghost_why.contains("another panel"), "panels can't overlap (%s)" % world._ghost_why)
+	await _shot("12b_placing_blocked")
+	await _stand_near(Vector3(70, 0, 40), Vector3.ZERO, Vector3(70, 0, 50))
+	p.pitch = -0.45
+	await _frames(4)
+	check(world._ghost_why.contains("too far"), "too far from the base is refused (%s)" % world._ghost_why)
+	await _press("clean")
+	check(s.panels == 1, "a red preview can't be placed")
+	await _press("pause")
+	check(not world.placing and not get_tree().paused, "Esc cancels placing without opening the menu")
+	var pos := Vector3(float(s.panel_spots[0][0]), 0, float(s.panel_spots[0][1]))
+	await _stand_near(pos, Vector3(0, 0, 2.0), pos)
+	check(world._act == "panel_pickup", "E next to a placed panel offers to pick it up")
+	await _press("interact")
+	check(s.panels == 0 and s.panel_stock == 2, "picking up returns it to your inventory (panels %d, stock %d, act '%s', prompt '%s')" % [s.panels, s.panel_stock, world._act, world.hud.prompt_lbl.text])
+	world.save_game()
+	var loaded := GameState.new()
+	loaded.load_into(RustField.new())
+	check(loaded.panel_stock == 2, "unplaced panels are saved")
 
 
 func _torch_flow() -> void:
