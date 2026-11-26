@@ -140,7 +140,9 @@ func apply_display() -> void:
 func _input(e: InputEvent) -> void:
 	var k := e as InputEventKey
 	if k and k.pressed and not k.echo and (k.keycode == KEY_F11 or (k.keycode == KEY_ENTER and k.alt_pressed)):
-		fullscreen = DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_FULLSCREEN
+		# Flip the setting, not the window's current mode: some window managers take a moment to
+		# report the change, and a quick second press would otherwise go fullscreen again.
+		fullscreen = not fullscreen
 		changed()
 		get_viewport().set_input_as_handled()
 
