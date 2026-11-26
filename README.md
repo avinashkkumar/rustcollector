@@ -29,7 +29,13 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
   battery; a failed motor stops the vehicle. Grime builds up and a dying motor smokes. Repair parts
   in the **Workshop** (base terminal) with the vehicle parked in its garage bay, or tow it there.
 - **Drones** work on their own inside a hexagon zone around the base (upgradeable 1–4 rings).
-- **Missions** (18) guide the early game; **relics** (12) turn up under the rust; a 16-minute
+- **Tracks:** tyres press twin tracks into the rust (with berms); boots leave footprints.
+- **Supply pods** (PUBG-style airdrops) land somewhere on the plain every few minutes with a light
+  beacon. Open them for ₹, **repair kits** (G at a vehicle: +50% to its worst part) and **battery
+  cells** (B at a vehicle: +10 kWh). **T** drops a waypoint beacon where you look.
+- **Contractor ranks** (CS-style), from Rust Rookie to Legend of Rustfall, each adding +3% to the
+  export price; an **end-of-sol report** card (rust, ₹, hexes, relics, MVP); vehicle **paint jobs**.
+- **Missions** (19) guide the early game; **relics** (12) turn up under the rust; a 16-minute
   day/night cycle; the plain never ends.
 
 ### Controls
@@ -43,6 +49,8 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
 | E | interact (depot, terminal, vehicles) | R | brush / charge cable on-off |
 | M | big map | Q | empty hopper (export at depot, dump elsewhere) |
 | H | hexagon grid on/off | E | exit vehicle |
+| T | waypoint (T on it again removes it) | mouse | free look (recentres by itself) |
+| G / B | use repair kit / battery cell at a vehicle | V | chase / hood camera |
 | F3 | FPS counter | F1 | show control hints |
 | Esc | pause menu (settings, mission log) | | |
 

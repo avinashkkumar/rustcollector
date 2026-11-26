@@ -153,6 +153,25 @@ func _debug_shot(path: String, delay: float, scene: String) -> void:
 		cam.current = true
 		w.hud.visible = false
 		await get_tree().create_timer(0.3).timeout
+	if scene == "features" and current is World:
+		var w: World = current
+		w.state.earned = 320000.0
+		w.state.credits = 320000.0
+		w.player.global_position = Vector3(30, w.terrain.height_at(30, 30) + 1.0, 30)
+		w.player.yaw = 0.0
+		w.player.pitch = -0.05
+		w._pod_timer = 0.0
+		await get_tree().process_frame
+		await get_tree().process_frame
+		w.pod.target = Vector3(28, w.terrain.height_at(28, 12), 12)
+		await get_tree().create_timer(10.5).timeout
+		w.player.yaw = 0.6
+		await get_tree().process_frame
+		w._place_waypoint()
+		w.player.yaw = 0.15
+		w.state.sol_kg = {you = 120.0, sweeper = 380.0, drones = 90.0}
+		w.hud.sol_report(w._sol_summary())
+		await get_tree().create_timer(1.0).timeout
 	if scene == "clean" and current is World:
 		var w: World = current
 		w.player.global_position = Vector3(42, w.terrain.height_at(42, 30) + 1.0, 30)
