@@ -23,7 +23,7 @@ const BINDS := {
 	"F": ["foot", "Clean", "", "Clean the rust you aim at (same as holding LMB)"],
 	"G": ["foot", "Kit", "", "Use a repair kit on the vehicle next to you"],
 	"B": ["foot", "Cell", "", "Install a battery cell in the vehicle next to you"],
-	"Q": ["drive", "", "Empty", "Empty the hopper (sells it at the depot)"],
+	"Q": ["both", "Unload", "Empty", "Tip tank into handcart, or drop a sack / Empty the hopper (sells it at the depot)"],
 	"R": ["drive", "", "Brush", "Sweeper brush on / off"],
 	"V": ["drive", "", "Cam", "Chase / hood camera"],
 	"T": ["both", "Mark", "Mark", "Set a waypoint where you look (again to remove)"],
@@ -101,7 +101,7 @@ func _draw() -> void:
 			continue
 		var parts := str(b[3]).split(" / ")
 		var desc: String = b[3]
-		if b[0] == "both" and parts.size() == 2 and label in ["W", "A", "S", "D", "Shift", "Space", "E", "L"]:
+		if b[0] == "both" and parts.size() == 2 and label in ["W", "A", "S", "D", "Shift", "Space", "E", "L", "Q"]:
 			desc = parts[1] if driving else parts[0]
 		draw_string(font, Vector2(tx, ty), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, _ctx_color(b[0]))
 		draw_string(font, Vector2(tx + 58, ty), desc, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 70.0, 15, Color(1, 1, 1, 0.9))

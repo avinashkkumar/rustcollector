@@ -332,8 +332,11 @@ func _update_text() -> void:
 	var done := s.hexes_cleared.has(RustField.hex_name(hk))
 	var hh := int(s.time_of_day * 24.0)
 	var mm := int(fmod(s.time_of_day * 1440.0, 60.0))
-	hex_lbl.text = "Hex %s · %d%% clean%s\nSol %d %02d:%02d · rust %s/kg" % [RustField.hex_name(hk), roundi(clean * 100.0),
-		" · bonus paid" if done else "", s.sol, hh, mm, GameState.inr(s.price_now())]
+	var hc := RustField.key_center(hk)
+	var crust := s.crust_at(hc.x, hc.y)
+	var tail := " · bonus paid" if done else (" · %s at 90%%" % GameState.inr(world.hex_bonus(hk)) if world.rust.hex_pristine_kg(hk) >= 40.0 else "")
+	hex_lbl.text = "Hex %s · %s · %d%%%s\nSol %d %02d:%02d · rust %s/kg" % [RustField.hex_name(hk), GameState.CRUST_NAMES[crust],
+		roundi(clean * 100.0), tail, s.sol, hh, mm, GameState.inr(s.price_now())]
 	hint_lbl.visible = s.play_time < 180.0
 	if key_guide.visible and key_guide.driving != (v != null):
 		key_guide.driving = v != null
@@ -342,7 +345,7 @@ func _update_text() -> void:
 		hint_lbl.text = "WASD drive · Shift boost · Space handbrake · mouse look · V camera · %sT waypoint · E exit · F1 all keys" % [
 			"R brush on/off · Q empty hopper · " if v == world.sweeper else ""]
 	else:
-		hint_lbl.text = "WASD move · Shift sprint · Space jump · LMB/F clean · E interact · T waypoint · M map · F1 all keys · Esc menu"
+		hint_lbl.text = "WASD move · Shift sprint · LMB/F clean · E interact · Q unload tank · L torch · T waypoint · M map · F1 all keys"
 
 
 static func _fmt_int(n: int) -> String:
@@ -361,9 +364,13 @@ func _build_shop() -> void:
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shop_layer.add_child(dim)
 	var vb := UiKit.centered_panel(shop_layer, Vector2(820, 0))
+	vb.custom_minimum_size.x = 790
 	vb.add_child(UiKit.label("BASE TERMINAL", 30, UiKit.ACCENT2))
-	shop_credits = UiKit.label("", 22, UiKit.ACCENT)
+	shop_credits = UiKit.label("", 20, UiKit.ACCENT)
 	vb.add_child(shop_credits)
+	_tab_bar = HBoxContainer.new()
+	_tab_bar.add_theme_constant_override("separation", 6)
+	vb.add_child(_tab_bar)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(780, 560)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -392,66 +399,102 @@ func _section(title: String) -> void:
 	shop_list.add_child(UiKit.label(title, 17, UiKit.ACCENT))
 
 
+const SHOP_TABS := ["Tools", "Gear", "Power", "Vehicles", "Workshop", "Drones", "Paint"]
+var shop_tab := "Tools"
+var _tab_bar: HBoxContainer
+
+
 func _refresh_shop() -> void:
 	var s := world.state
-	shop_credits.text = "Balance: %s   ·   rust sells for %s/kg" % [GameState.inr(s.credits), GameState.inr(GameState.SELL_PRICE)]
+	shop_credits.text = "Balance: %s   ·   rust sells for %s/kg   ·   %s   ·   %s" % [GameState.inr(s.credits),
+		GameState.inr(s.price_now()), s.rank_name(), s.diff().name]
+	for c in _tab_bar.get_children():
+		c.queue_free()
+	for t in SHOP_TABS:
+		var b := UiKit.button(t, func() -> void:
+			shop_tab = t
+			_refresh_shop(), 104)
+		b.toggle_mode = true
+		b.button_pressed = t == shop_tab
+		_tab_bar.add_child(b)
 	for c in shop_list.get_children():
 		c.queue_free()
-	_section("CLEANING TOOL")
-	if s.tool_lvl < GameState.TOOLS.size() - 1:
-		var t: Dictionary = GameState.TOOLS[s.tool_lvl + 1]
-		_row("Next tool: %s" % t.name, "%s  (tier %d/%d) Upgrades below carry over." % [t.desc, s.tool_lvl + 2, GameState.TOOLS.size()], "tool")
-	else:
-		_row("Tool: %s" % s.tool().name, "Top-tier tool installed.", "")
-	for m in ["power", "width", "reach"]:
-		var d: Dictionary = GameState.TOOL_MODS[m]
-		_row("%s  (level %d/%d)" % [d.name, s.mods[m], d.max], d.desc, m)
-	_section("GEAR")
-	var nt := s.tank_lvl + 1
-	_row("Rust tank: %.0f kg" % (GameState.TANKS[nt].cap if nt < GameState.TANKS.size() else s.capacity()),
-		"Carry more rust per trip (now %.0f kg)." % s.capacity(), "tank")
-	var nb := s.boots_lvl + 1
-	_row("Servo boots  +%d%%" % int(((GameState.BOOTS[nb].mult if nb < GameState.BOOTS.size() else s.boots_mult()) - 1.0) * 100),
-		"Walk and sprint faster.", "boots")
-	_section("POWER")
-	_row("Solar panel  (%d/%d installed)" % [s.panels, GameState.MAX_PANELS],
-		"+%.0f kW generation and +%.0f kWh of base battery. Vehicles charge from it at the garage posts." % [GameState.PANEL_KW, GameState.BANK_PER_PANEL], "panel")
-	_section("VEHICLES")
-	_row("Sweeper", "Drivable 4.6 m roller brush with a %.0f kg hopper. Runs on battery." % GameState.SWEEPER_HOPPER, "sweeper")
-	if s.sweeper_owned:
-		var nlv := s.sweeper_batt_lvl + 1
-		_row("Sweeper battery pack", "Capacity %.0f kWh%s." % [s.sweeper_battery(),
-			(" -> %.0f kWh" % GameState.SWEEPER_BATT[nlv].kwh) if nlv < GameState.SWEEPER_BATT.size() else " (max)"], "sweeper_batt")
-	_row("Charger cart", "Mobile %.0f kWh battery. Park it next to a stranded Sweeper and connect its cable." % GameState.CHARGER_BATT, "charger")
-	_row("Tow sweeper to the garage", "Recover a stranded sweeper to its garage bay.", "tow_sweeper")
-	_row("Tow charger cart to the garage", "Recover the charger cart to its garage bay.", "tow_charger")
-	_section("WORKSHOP")
-	for veh in [world.sweeper, world.charger]:
-		if not world.owns(veh):
-			continue
-		var in_bay := world.bay_of(veh) >= 0
-		var parts: Array = ["tyres", "brush", "motor"] if veh == world.sweeper else ["tyres", "motor"]
-		for part in parts:
-			var c: float = s.wear[veh.kind][part]
-			var desc := "Condition %d%%." % roundi(c * 100.0)
-			if c >= 0.995:
-				desc += " As good as new."
-			elif not in_bay:
-				desc += " Park it in its garage bay (or tow it) to repair."
-			_row("%s: %s" % [veh.display_name(), GameState.PART_NAMES[part]], desc, "repair_%s_%s" % [veh.kind, part])
-	_section("PAINT SHOP")
-	for veh in [world.sweeper, world.charger]:
-		if not world.owns(veh):
-			continue
-		for lv in GameState.LIVERIES:
-			var owned: bool = (s.liveries[veh.kind] as Array).has(lv.id)
-			var on: bool = s.livery[veh.kind] == lv.id
-			var desc := "Applied." if on else ("Owned: apply for free." if owned else "Cosmetic paint job.")
-			_row("%s: %s" % [veh.display_name(), lv.name], desc, "paint_%s_%s" % [veh.kind, lv.id])
-	_section("DRONES")
-	_row("Cleaning drone  (%d/%d)" % [s.drones, GameState.MAX_DRONES], "Works on its own inside the drone zone; exports remotely at 50%.", "drone")
-	_row("Drone relay range  (%d ring%s)" % [s.drone_range, "" if s.drone_range == 1 else "s"],
-		"Extends the drone zone by one ring of hexagons around the base.", "drone_range")
+	match shop_tab:
+		"Tools":
+			var cur := s.tool()
+			var star := s.mastery_level()
+			var nk := s.mastery_next_kg()
+			_section("%s  %s" % [cur.name.to_upper(), "★".repeat(star) + "☆".repeat(GameState.MASTERY_KG.size() - 1 - star)])
+			shop_list.add_child(UiKit.label(("Mastery grows as you clean with it: %.0f kg to the next star (+%d%% speed each). Upgrades can't go above your stars." % [nk, roundi(GameState.MASTERY_BONUS * 100.0)]) if nk > 0.0 else "Fully mastered.", 14, UiKit.MUTED))
+			if s.tool_lvl < GameState.TOOLS.size() - 1:
+				var t: Dictionary = GameState.TOOLS[s.tool_lvl + 1]
+				_row("Next tool: %s" % t.name, "%s Tier %d: handles %s. Upgrades carry over; mastery starts again." % [t.desc, s.tool_lvl + 2, GameState.CRUST_NAMES[s.tool_lvl + 1]], "tool")
+			else:
+				_row("Tool: %s" % cur.name, "Top-tier tool installed.", "")
+			for m in ["power", "width", "reach"]:
+				var d: Dictionary = GameState.TOOL_MODS[m]
+				_row("%s  (level %d/%d)" % [d.name, s.mods[m], d.max], d.desc, m)
+		"Gear":
+			var nt := s.tank_lvl + 1
+			_row("Rust tank: %.0f kg" % (GameState.TANKS[nt].cap if nt < GameState.TANKS.size() else s.capacity()),
+				"Carry more rust per trip (now %.0f kg)." % s.capacity(), "tank")
+			var nc := s.cart_lvl + 1
+			_row(("Handcart  (%.0f kg)" % GameState.CARTS[0].cap) if s.cart_lvl < 0 else ("Bigger handcart bin: %.0f kg" % (GameState.CARTS[nc].cap if nc < GameState.CARTS.size() else s.cart_capacity())),
+				"Push it to where you work, tip your tank in with Q, push it back to the depot. No fee." if s.cart_lvl < 0 else "Now %.0f kg." % s.cart_capacity(), "cart")
+			var nb := s.boots_lvl + 1
+			_row("Servo boots  +%d%%" % int(((GameState.BOOTS[nb].mult if nb < GameState.BOOTS.size() else s.boots_mult()) - 1.0) * 100),
+				"Walk and sprint faster.", "boots")
+			shop_list.add_child(UiKit.label("Away from the depot, Q drops your tank as a sack. The hauler collects sacks every %d min for a %d%% fee." % [roundi(GameState.HAUL_INTERVAL / 60.0), roundi(s.haul_fee() * 100.0)], 14, UiKit.MUTED))
+		"Power":
+			_row("Solar panel  (%d/%d installed)" % [s.panels, GameState.MAX_PANELS],
+				"+%.0f kW generation and +%.0f kWh of base battery. Vehicles charge from it at the garage posts." % [GameState.PANEL_KW, GameState.BANK_PER_PANEL], "panel")
+		"Vehicles":
+			_row("Sweeper", "Drivable 4.6 m roller brush with a %.0f kg hopper. Handles up to Crust III. Runs on battery." % GameState.SWEEPER_HOPPER, "sweeper")
+			if s.sweeper_owned:
+				var nlv := s.sweeper_batt_lvl + 1
+				_row("Sweeper battery pack", "Capacity %.0f kWh%s." % [s.sweeper_battery(),
+					(" -> %.0f kWh" % GameState.SWEEPER_BATT[nlv].kwh) if nlv < GameState.SWEEPER_BATT.size() else " (max)"], "sweeper_batt")
+			_row("Charger cart", "Mobile %.0f kWh battery. Park it next to a stranded Sweeper and connect its cable." % GameState.CHARGER_BATT, "charger")
+			if s.sweeper_owned:
+				_row("Tow sweeper to the garage", "Recover a stranded sweeper to its garage bay.", "tow_sweeper")
+			if s.charger_owned:
+				_row("Tow charger cart to the garage", "Recover the charger cart to its garage bay.", "tow_charger")
+		"Workshop":
+			var any := false
+			for veh in [world.sweeper, world.charger]:
+				if not world.owns(veh):
+					continue
+				any = true
+				var in_bay := world.bay_of(veh) >= 0
+				var parts: Array = ["tyres", "brush", "motor"] if veh == world.sweeper else ["tyres", "motor"]
+				for part in parts:
+					var c: float = s.wear[veh.kind][part]
+					var desc := "Condition %d%%." % roundi(c * 100.0)
+					if c >= 0.995:
+						desc += " As good as new."
+					elif not in_bay:
+						desc += " Park it in its garage bay (or tow it) to repair."
+					_row("%s: %s" % [veh.display_name(), GameState.PART_NAMES[part]], desc, "repair_%s_%s" % [veh.kind, part])
+			if not any:
+				shop_list.add_child(UiKit.label("Repairs for your vehicles appear here once you own one.", 15, UiKit.MUTED))
+		"Paint":
+			var any := false
+			for veh in [world.sweeper, world.charger]:
+				if not world.owns(veh):
+					continue
+				any = true
+				for lv in GameState.LIVERIES:
+					var owned: bool = (s.liveries[veh.kind] as Array).has(lv.id)
+					var on: bool = s.livery[veh.kind] == lv.id
+					var desc := "Applied." if on else ("Owned: apply for free." if owned else "Cosmetic paint job.")
+					_row("%s: %s" % [veh.display_name(), lv.name], desc, "paint_%s_%s" % [veh.kind, lv.id])
+			if not any:
+				shop_list.add_child(UiKit.label("Paint jobs for your vehicles appear here once you own one.", 15, UiKit.MUTED))
+		"Drones":
+			_row("Cleaning drone  (%d/%d)" % [s.drones, GameState.MAX_DRONES], "Works on its own inside the drone zone; exports remotely at 50%. Handles Crust II.", "drone")
+			if s.drones > 0:
+				_row("Drone relay range  (%d ring%s)" % [s.drone_range, "" if s.drone_range == 1 else "s"],
+					"Extends the drone zone by one ring of hexagons around the base.", "drone_range")
 
 
 func _row(title: String, desc: String, item: String) -> void:
@@ -465,7 +508,17 @@ func _row(title: String, desc: String, item: String) -> void:
 	vb.add_child(d)
 	hb.add_child(vb)
 	var cost := world.price(item) if item != "" else -1
-	if cost >= 0:
+	var lock := world.lock_reason(item) if item != "" else ""
+	if lock != "":
+		(vb.get_child(0) as Label).modulate = Color(1, 1, 1, 0.55)
+		var l := UiKit.label("Locked: " + lock, 14, Color(1.0, 0.6, 0.4))
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		vb.add_child(l)
+		var lk := UiKit.label("🔒", 22, UiKit.MUTED)
+		lk.custom_minimum_size.x = 190
+		lk.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hb.add_child(lk)
+	elif cost >= 0:
 		var b := UiKit.button(("Buy  %s" % GameState.inr(cost)) if cost > 0 else "Apply", func() -> void:
 			if world.buy(item):
 				toast(("Purchased: %s" if cost > 0 else "Applied: %s") % title, 2.5)
