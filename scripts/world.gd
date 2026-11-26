@@ -15,6 +15,7 @@ const SOLAR_ORIGIN := Vector3(-18, 0, -25)
 
 var mode := "play"
 var seed_value := 4242
+var world_name := ""
 var load_save := false
 var params: Dictionary
 var terrain: Terrain

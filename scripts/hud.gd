@@ -495,7 +495,7 @@ func _build_pause() -> void:
 	pause_main = VBoxContainer.new()
 	pause_main.add_theme_constant_override("separation", 10)
 	vb.add_child(pause_main)
-	pause_main.add_child(UiKit.label("Paused", 30, UiKit.ACCENT))
+	pause_main.add_child(UiKit.label("Paused" + ("  ·  " + world.world_name if world.world_name != "" else ""), 30, UiKit.ACCENT))
 	pause_main.add_child(UiKit.button("Resume", toggle_pause, 520))
 	pause_main.add_child(UiKit.button("Mission log & stats", _show_log, 520))
 	pause_main.add_child(UiKit.button("Settings", func() -> void:

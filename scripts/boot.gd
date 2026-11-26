@@ -18,10 +18,12 @@ var _story_shown := false
 func _ready() -> void:
 	var args := parse_args()
 	if args.has("playtest") or args.has("debug-shot"):
-		GameState.save_dir = "user://dev/"  # never overwrite or delete the player's real save
+		Worlds.root = "user://dev/worlds/"  # never touch the player's real worlds
+	else:
+		Worlds.migrate_legacy()
 	if args.has("playtest"):
 		_story_shown = true
-		start_game(false)
+		start_game(_fresh_dev_world(), true)
 		var pt := Playtest.new()
 		pt.world = current
 		pt.out_dir = str(args["playtest"])
@@ -58,25 +60,29 @@ func show_menu() -> void:
 	Config.override_upscaler = ""
 	Config.apply_display()
 	var m := MainMenu.new()
-	m.new_game.connect(func() -> void: start_game(false))
-	m.continue_game.connect(func() -> void: start_game(true))
+	m.play_world.connect(func(id: String, is_new: bool) -> void: start_game(id, is_new))
 	m.run_benchmark.connect(func(p: String) -> void: start_benchmark(p, {}))
 	_swap(m)
 
 
-func start_game(load_save: bool) -> void:
-	if not load_save:
-		GameState.delete_save()
-		if not _story_shown:
-			_story_shown = true
-			var st := Story.new()
-			st.finished.connect(func() -> void: start_game.call_deferred(false))
-			_swap(st)
-			return
+## Opens a world. A brand-new world plays the opening story first.
+func start_game(world_id: String, is_new: bool) -> void:
+	var meta := Worlds.select(world_id)
+	if meta.is_empty():
+		show_menu()
+		return
+	if is_new and not _story_shown:
+		_story_shown = true
+		var st := Story.new()
+		st.finished.connect(func() -> void: start_game.call_deferred(world_id, true))
+		_swap(st)
+		return
 	_story_shown = false
 	var w := World.new()
 	w.mode = "play"
-	w.load_save = load_save
+	w.seed_value = int(meta.seed)
+	w.world_name = str(meta.name)
+	w.load_save = GameState.has_save()
 	w.quit_to_menu.connect(func() -> void: show_menu.call_deferred())
 	_swap(w)
 
@@ -98,15 +104,26 @@ func start_benchmark(preset: String, args: Dictionary) -> void:
 
 
 ## Developer helper: open a scene, wait, save a screenshot, quit.
+## A clean throwaway world in the developer folder, with the classic seed so captures compare.
+func _fresh_dev_world() -> String:
+	for w in Worlds.list():
+		Worlds.delete(w.id)
+	return Worlds.create("Dev world", "4242")
+
+
 func _debug_shot(path: String, delay: float, scene: String) -> void:
-	if scene == "menu":
+	if scene == "menu" or scene == "worlds":
+		_fresh_dev_world()
+		Worlds.create("Red Valley", "mars")
 		show_menu()
+		if scene == "worlds":
+			(current as MainMenu).show_worlds()
 	elif scene == "story":
 		_story_shown = false
-		start_game(false)
+		start_game(_fresh_dev_world(), true)
 	else:
 		_story_shown = true
-		start_game(false)
+		start_game(_fresh_dev_world(), true)
 	await get_tree().create_timer(delay).timeout
 	if scene == "drive" and current is World:
 		var w: World = current

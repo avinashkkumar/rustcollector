@@ -2,11 +2,15 @@ class_name MainMenu
 extends Control
 ## Title screen.
 
-signal new_game
-signal continue_game
+signal play_world(id: String, is_new: bool)
 signal run_benchmark(preset: String)
 
 var _main: VBoxContainer
+var _worlds: VBoxContainer
+var _world_list: VBoxContainer
+var _create: VBoxContainer
+var _name_edit: LineEdit
+var _seed_edit: LineEdit
 var _settings: SettingsPanel
 var _bench_preset := "high"
 
@@ -73,9 +77,17 @@ void fragment() {
 	_main = VBoxContainer.new()
 	_main.add_theme_constant_override("separation", 10)
 	stack.add_child(_main)
-	if GameState.has_save():
-		_main.add_child(UiKit.button("Continue", func() -> void: continue_game.emit(), 340))
-	_main.add_child(UiKit.button("New game", func() -> void: new_game.emit(), 340))
+	var all := Worlds.list()
+	if not all.is_empty():
+		var last: Dictionary = all[0]
+		var cont := UiKit.button("Continue: %s" % last.name, func() -> void: play_world.emit(last.id, not last.played), 340)
+		cont.clip_text = true
+		_main.add_child(cont)
+	_main.add_child(UiKit.button("Worlds (%d)" % all.size() if not all.is_empty() else "New world", func() -> void:
+		if all.is_empty():
+			_show(_create)
+		else:
+			show_worlds(), 340))
 	var bench_row := HBoxContainer.new()
 	bench_row.add_theme_constant_override("separation", 8)
 	var bench := UiKit.button("Run benchmark", func() -> void: run_benchmark.emit(_bench_preset), 200)
@@ -92,6 +104,7 @@ void fragment() {
 		_main.visible = false
 		_settings.visible = true, 340))
 	_main.add_child(UiKit.button("Quit", func() -> void: get_tree().quit(), 340))
+	_build_worlds(stack)
 	_settings = SettingsPanel.new()
 	_settings.visible = false
 	_settings.closed.connect(func() -> void:
@@ -108,3 +121,136 @@ void fragment() {
 	foot.offset_top = -40
 	add_child(foot)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _show(panel: Control) -> void:
+	for p in [_main, _worlds, _create]:
+		p.visible = p == panel
+	if panel == _create:
+		_name_edit.text = ""
+		_name_edit.placeholder_text = Worlds.next_default_name()
+		_seed_edit.text = ""
+		_name_edit.grab_focus()
+
+
+func show_worlds() -> void:
+	_refresh_worlds()
+	_show(_worlds)
+
+
+func _build_worlds(stack: VBoxContainer) -> void:
+	_worlds = VBoxContainer.new()
+	_worlds.add_theme_constant_override("separation", 10)
+	_worlds.visible = false
+	stack.add_child(_worlds)
+	_worlds.add_child(UiKit.label("WORLDS", 26, UiKit.ACCENT))
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(860, 420)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_worlds.add_child(scroll)
+	_world_list = VBoxContainer.new()
+	_world_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_world_list.add_theme_constant_override("separation", 8)
+	scroll.add_child(_world_list)
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 10)
+	bar.add_child(UiKit.button("Create new world", func() -> void: _show(_create), 300))
+	bar.add_child(UiKit.button("Back", func() -> void: _show(_main), 160))
+	_worlds.add_child(bar)
+
+	_create = VBoxContainer.new()
+	_create.add_theme_constant_override("separation", 10)
+	_create.visible = false
+	stack.add_child(_create)
+	_create.add_child(UiKit.label("CREATE NEW WORLD", 26, UiKit.ACCENT))
+	_create.add_child(UiKit.label("World name", 16, UiKit.MUTED))
+	_name_edit = LineEdit.new()
+	_name_edit.custom_minimum_size = Vector2(520, 44)
+	_name_edit.max_length = 40
+	_create.add_child(_name_edit)
+	_create.add_child(UiKit.label("Seed for the terrain (leave blank for a random one; any word or number works)", 16, UiKit.MUTED))
+	_seed_edit = LineEdit.new()
+	_seed_edit.custom_minimum_size = Vector2(520, 44)
+	_seed_edit.placeholder_text = "random"
+	_seed_edit.max_length = 40
+	_create.add_child(_seed_edit)
+	var go := func() -> void:
+		var id := Worlds.create(_name_edit.text, _seed_edit.text)
+		play_world.emit(id, true)
+	_name_edit.text_submitted.connect(func(_t: String) -> void: go.call())
+	_seed_edit.text_submitted.connect(func(_t: String) -> void: go.call())
+	var bar2 := HBoxContainer.new()
+	bar2.add_theme_constant_override("separation", 10)
+	bar2.add_child(UiKit.button("Create & play", go, 300))
+	bar2.add_child(UiKit.button("Cancel", func() -> void:
+		if Worlds.list().is_empty():
+			_show(_main)
+		else:
+			show_worlds(), 160))
+	_create.add_child(bar2)
+
+
+func _refresh_worlds() -> void:
+	for c in _world_list.get_children():
+		c.queue_free()
+	for w in Worlds.list():
+		var row := PanelContainer.new()
+		var hb := HBoxContainer.new()
+		hb.add_theme_constant_override("separation", 8)
+		row.add_child(hb)
+		var info := VBoxContainer.new()
+		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var title := UiKit.label(str(w.name), 20)
+		info.add_child(title)
+		info.add_child(UiKit.label(Worlds.describe(w), 13, UiKit.MUTED))
+		hb.add_child(info)
+		var id: String = w.id
+		var is_new: bool = not w.played
+		hb.add_child(UiKit.button("Play", func() -> void: play_world.emit(id, is_new), 100))
+		var rename_btn := UiKit.button("Rename", Callable(), 110)
+		rename_btn.pressed.connect(func() -> void: _start_rename(info, title, id))
+		hb.add_child(rename_btn)
+		var del := UiKit.button("Delete", Callable(), 110)
+		del.pressed.connect(func() -> void:
+			if del.text == "Delete":
+				del.text = "Sure?"
+				del.add_theme_color_override("font_color", Color(1.0, 0.45, 0.35))
+				get_tree().create_timer(3.0).timeout.connect(func() -> void:
+					if is_instance_valid(del):
+						del.text = "Delete"
+						del.remove_theme_color_override("font_color"))
+			else:
+				Worlds.delete(id)
+				if Worlds.list().is_empty():
+					_show(_main)
+					_rebuild_main_buttons()
+				else:
+					_refresh_worlds())
+		hb.add_child(del)
+		_world_list.add_child(row)
+
+
+func _start_rename(info: VBoxContainer, title: Label, id: String) -> void:
+	var edit := LineEdit.new()
+	edit.text = title.text
+	edit.max_length = 40
+	edit.custom_minimum_size = Vector2(360, 36)
+	title.visible = false
+	info.add_child(edit)
+	info.move_child(edit, 0)
+	edit.grab_focus()
+	edit.select_all()
+	var state := {done = false}
+	var done := func(t: String) -> void:
+		if state.done:
+			return
+		state.done = true
+		Worlds.rename(id, t)
+		_refresh_worlds()
+	edit.text_submitted.connect(done)
+	edit.focus_exited.connect(func() -> void: done.call(edit.text))
+
+
+## After the last world is deleted the main column must lose its "Continue" button.
+func _rebuild_main_buttons() -> void:
+	get_parent().call_deferred("show_menu")
