@@ -280,6 +280,9 @@ func _build_nodes(d: Dictionary) -> void:
 	mat.set_shader_parameter("detail_noise", _detail_tex)
 	mat.set_shader_parameter("rock_normal", _normal_tex)
 	mat.set_shader_parameter("rust_mask", rust.texture_for(k))
+	var tt := rust.track_texture(k)
+	if tt:
+		mat.set_shader_parameter("track_mask", tt)
 	mi.material_override = mat
 	mi.visibility_range_end = view_dist + CHUNK
 	# A near-flat plain barely self-shadows (rust-edge shadows are done in the shader), so skip
@@ -321,6 +324,12 @@ func _ensure_collision(k: Vector2i) -> void:
 	body.position = Vector3(CHUNK * 0.5, 0, CHUNK * 0.5)
 	body.add_child(cs)
 	root.add_child(body)
+
+
+## Called when tracks appear in a chunk that is already built.
+func set_track_texture(k: Vector2i, tex: Texture2D) -> void:
+	if chunks.has(k):
+		((chunks[k].get_node("Mesh") as MeshInstance3D).material_override as ShaderMaterial).set_shader_parameter("track_mask", tex)
 
 
 func set_view(dist: float) -> void:

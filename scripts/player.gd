@@ -19,6 +19,8 @@ var _shape: CollisionShape3D
 var _anim := 0.0
 var _bob := 0.0
 var _built_tool := -1
+var _step := 0.0
+var _left_foot := false
 
 
 func _ready() -> void:
@@ -85,7 +87,15 @@ func _physics_process(dt: float) -> void:
 		velocity.y -= world.gravity * dt
 	move_and_slide()
 	if is_on_floor():
-		_bob += Vector2(velocity.x, velocity.z).length() * dt * 1.8
+		var moved := Vector2(velocity.x, velocity.z).length() * dt
+		_bob += moved * 1.8
+		# Boot prints, alternating left and right.
+		_step += moved
+		if _step > 0.8:
+			_step = 0.0
+			_left_foot = not _left_foot
+			var side := transform.basis.x * (0.14 if _left_foot else -0.14)
+			world.rust.press(global_position + side, 0.13, 0.7)
 
 
 func _process(dt: float) -> void:

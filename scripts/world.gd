@@ -70,6 +70,7 @@ func _ready() -> void:
 	terrain.rust = rust
 	add_child(terrain)
 	terrain.setup()
+	rust.on_track_created = terrain.set_track_texture
 	terrain.set_view(params.view_dist)
 	if mode == "benchmark":
 		# Everything the benchmark visits is built up front at full detail: no streaming

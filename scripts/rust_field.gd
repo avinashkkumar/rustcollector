@@ -18,6 +18,11 @@ var uploads := 0
 var removed_kg := 0.0
 var touched_hexes := {}  # hexes painted since the HUD last polled
 var _dirty := {}
+# Tyre tracks and footprints pressed into the rust (not cleaning). Separate R8 texture per chunk,
+# created only where something has driven or walked.
+var tracks := {}  # Vector2i -> {data, image, tex}
+var _track_dirty := {}
+var on_track_created: Callable  # (key, texture) -> void, set by the world to hook up terrain
 var _gen: FastNoiseLite
 var _sample: FastNoiseLite
 var _hex_init := {}
@@ -78,6 +83,50 @@ func release(k: Vector2i) -> void:
 	if chunks.has(k) and not chunks[k].modified:
 		chunks.erase(k)
 		_dirty.erase(k)
+	tracks.erase(k)
+	_track_dirty.erase(k)
+
+
+func track_texture(k: Vector2i) -> ImageTexture:
+	return tracks[k].tex if tracks.has(k) else null
+
+
+## Presses a soft dent of `depth` (0..1) into the rust layer, e.g. under a wheel or a boot.
+func press(pos: Vector3, radius_m: float, depth: float) -> void:
+	var r := maxf(radius_m * PPM, 0.75)
+	var r2 := r * r
+	var gx := pos.x * PPM
+	var gy := pos.z * PPM
+	var x0 := floori(gx - r)
+	var x1 := floori(gx + r)
+	var y0 := floori(gy - r)
+	var y1 := floori(gy + r)
+	for ky in range(floori(float(y0) / RES), floori(float(y1) / RES) + 1):
+		for kx in range(floori(float(x0) / RES), floori(float(x1) / RES) + 1):
+			var k := Vector2i(kx, ky)
+			if not tracks.has(k):
+				var blank := PackedByteArray()
+				blank.resize(RES * RES)
+				var img := Image.create_from_data(RES, RES, false, Image.FORMAT_R8, blank)
+				tracks[k] = {data = blank, image = img, tex = ImageTexture.create_from_image(img)}
+				if on_track_created.is_valid():
+					on_track_created.call(k, tracks[k].tex)
+			var t: Dictionary = tracks[k]
+			var data: PackedByteArray = t.data
+			t.data = PackedByteArray()  # sole owner: write in place
+			var bx := kx * RES
+			var by := ky * RES
+			for y in range(maxi(y0 - by, 0), mini(y1 - by, RES - 1) + 1):
+				var dy := by + y + 0.5 - gy
+				for x in range(maxi(x0 - bx, 0), mini(x1 - bx, RES - 1) + 1):
+					var dx := bx + x + 0.5 - gx
+					var d2 := dx * dx + dy * dy
+					if d2 > r2:
+						continue
+					var i := y * RES + x
+					data[i] = maxi(data[i], int(depth * 255.0 * (1.0 - 0.6 * d2 / r2)))
+			t.data = data
+			_track_dirty[k] = true
 
 
 ## Removes rust in a soft circle. strength = fraction of a full cell removed at the centre.
@@ -178,6 +227,11 @@ func upload() -> void:
 			c.tex.update(c.image)
 			uploads += 1
 	_dirty.clear()
+	for k in _track_dirty:
+		var t: Dictionary = tracks[k]
+		t.image.set_data(RES, RES, false, Image.FORMAT_R8, t.data)
+		t.tex.update(t.image)
+	_track_dirty.clear()
 
 
 ## 0..255 rust value at a world position, generating the chunk if needed.

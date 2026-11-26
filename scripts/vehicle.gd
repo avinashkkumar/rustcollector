@@ -46,6 +46,7 @@ var _tyre_mat: StandardMaterial3D
 var _legs: Array = []  # [MeshInstance3D, attach point, wheel pivot]
 var _wheel_r := 0.45
 var _vis_t := 0.0
+var _track_dist := 0.0
 
 var model: Node3D
 var body_pivot: Node3D
@@ -297,6 +298,13 @@ func _process(dt: float) -> void:
 		var x := y.cross(Vector3.FORWARD)
 		x = Vector3.RIGHT if x.length_squared() < 0.0001 else x.normalized()
 		(leg[0] as MeshInstance3D).transform = Transform3D(Basis(x, y * d.length(), x.cross(y)), (a + b) * 0.5)
+	# Tyre tracks: each wheel presses into the rust every ~15 cm travelled.
+	_track_dist += absf(speed) * dt
+	if _track_dist > 0.15 and visible:
+		_track_dist = 0.0
+		for w in wheels:
+			var c := (w as Node3D).global_position
+			world.rust.press(Vector3(c.x, 0, c.z), 0.24, 0.95)
 	var brush: float = cond.get("brush", 0.0)
 	sweeping = kind == "sweeper" and brush > 0.0 and absf(speed) > 0.4 and (energy > 0.0 or autopilot) and (
 		(driving and tool_on) or (autopilot and autopilot_sweep))

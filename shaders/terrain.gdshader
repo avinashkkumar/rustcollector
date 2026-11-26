@@ -9,6 +9,8 @@ global uniform vec2 sun_xz;         // horizontal direction towards the sun
 
 // Per-chunk R8 mask: 1 = full rust layer, 0 = cleared down to bare rock.
 uniform sampler2D rust_mask : hint_default_white, filter_linear, repeat_disable;
+// Per-chunk R8 dents from tyres and boots (0 = untouched). Black when nothing has passed.
+uniform sampler2D track_mask : hint_default_black, filter_linear, repeat_disable;
 uniform sampler2D detail_noise : hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D rock_normal : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform vec3 rock_a : source_color = vec3(0.33, 0.20, 0.13);
@@ -29,6 +31,10 @@ void vertex() {
 
 float mask_at(vec2 wxz, vec2 org) {
 	return textureLod(rust_mask, (wxz - org) / chunk_size, 0.0).r;
+}
+
+float track_at(vec2 wxz, vec2 org) {
+	return textureLod(track_mask, (wxz - org) / chunk_size, 0.0).r;
 }
 
 float coverage(vec2 wxz, vec2 org) {
@@ -62,7 +68,9 @@ void fragment() {
 		vec2 q = p;
 		float d = 0.0;
 		for (int i = 0; i < pom_steps; i++) {
-			float carved = layer_depth * (1.0 - smoothstep(0.08, 0.5, mask_at(q, org)));
+			float m = mask_at(q, org);
+			// Cleared cells are carved to the rock; tracks press part-way into remaining rust.
+			float carved = layer_depth * max(1.0 - smoothstep(0.08, 0.5, m), track_at(q, org) * 0.55 * smoothstep(0.05, 0.3, m));
 			if (d >= carved) {
 				break;
 			}
@@ -82,6 +90,13 @@ void fragment() {
 	rock *= 0.85 + 0.3 * n_fine; // gritty speckle
 	vec3 rust_c = mix(rust_b, rust_a, smoothstep(0.2, 0.8, n_big * 0.6 + n_fine * 0.4));
 
+	// Compacted rust in tyre tracks and footprints is darker and smoother.
+	// Crisp edge for the dent, and a lighter berm where the rust was pushed aside.
+	float raw_tr = track_at(p, org);
+	float tr = smoothstep(0.28, 0.55, raw_tr) * cov;
+	float berm = (smoothstep(0.04, 0.2, raw_tr) - smoothstep(0.24, 0.42, raw_tr)) * cov;
+	rust_c = mix(rust_c, rust_c * vec3(0.5, 0.46, 0.44), tr * 0.95);
+	rust_c = mix(rust_c, rust_c * 1.22, berm * 0.6);
 	vec3 col = mix(rock, rust_c, cov);
 	// Cut faces of the layer read darker than the top.
 	float wall = 4.0 * cov * (1.0 - cov);
