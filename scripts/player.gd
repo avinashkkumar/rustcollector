@@ -22,6 +22,11 @@ var _built_tool := -1
 var _step := 0.0
 var _left_foot := false
 var torch_on := false
+var climbing := false  # on a ladder
+var _mantle_t := -1.0  # >= 0 while pulling up onto a ledge
+var _climb_buffer := 0.0  # after Space, keep looking for a ledge to grab for a moment
+var _mantle_from := Vector3.ZERO
+var _mantle_to := Vector3.ZERO
 var torch_root: Node3D
 var torch_light: SpotLight3D
 var _torch_lens: StandardMaterial3D
@@ -127,11 +132,23 @@ func _physics_process(dt: float) -> void:
 	var spd := (WALK * 0.72 if pushing_cart else (SPRINT if Input.is_action_pressed("sprint") else WALK)) * world.state.boots_mult()
 	if cleaning:
 		spd *= 0.8
+	if _mantle_t >= 0.0:
+		_update_mantle(dt)
+		return
+	if _update_ladder(dt, inp):
+		return
 	var k := 1.0 - exp(-(10.0 if is_on_floor() else 2.0) * dt)
 	velocity.x = lerpf(velocity.x, dir.x * spd, k)
 	velocity.z = lerpf(velocity.z, dir.z * spd, k)
+	var jump := Input.is_action_just_pressed("jump") and not world.ui_open
+	if jump:
+		_climb_buffer = 0.35
+	_climb_buffer -= dt
+	if _climb_buffer > 0.0 and not pushing_cart and _try_mantle():
+		_climb_buffer = 0.0
+		return
 	if is_on_floor():
-		if Input.is_action_just_pressed("jump") and not world.ui_open:
+		if jump:
 			velocity.y = JUMP
 	else:
 		velocity.y -= world.gravity * dt
@@ -148,6 +165,109 @@ func _physics_process(dt: float) -> void:
 			world.rust.press(global_position + side, 0.13, 0.7)
 
 
+# ---------------------------------------------------------------- climbing
+
+const MANTLE_REACH := 2.5  # how far above your feet you can pull yourself up
+const MANTLE_TIME := 0.42
+
+
+## PUBG-style climb: Space facing a ledge up to 2.5 m above your feet (also mid-jump) pulls you on top.
+func _try_mantle() -> bool:
+	var space := get_world_3d().direct_space_state
+	var fwd := -global_basis.z
+	fwd.y = 0
+	fwd = fwd.normalized()
+	var feet := global_position
+	var wall_hit := {}
+	for hgt in [0.45, 1.0, 1.6]:
+		var q := PhysicsRayQueryParameters3D.create(feet + Vector3(0, hgt, 0), feet + Vector3(0, hgt, 0) + fwd * 1.1, 4)
+		q.exclude = [get_rid()]
+		wall_hit = space.intersect_ray(q)
+		if wall_hit:
+			break
+	if not wall_hit:
+		if OS.is_debug_build() and world.has_meta("debug_mantle"):
+			print("mantle: no wall ahead")
+		return false
+	# Look down onto the top past the wall face; rounded tops are steep at the edge, so try
+	# further in until there is somewhere flat enough to stand.
+	var top := {}
+	for inset in [0.45, 0.8, 1.2, 1.6]:
+		var over: Vector3 = wall_hit.position + fwd * inset
+		var q2 := PhysicsRayQueryParameters3D.create(Vector3(over.x, feet.y + MANTLE_REACH + 0.3, over.z), Vector3(over.x, feet.y + 0.3, over.z), 1 | 4)
+		q2.exclude = [get_rid()]
+		top = space.intersect_ray(q2)
+		if top and (top.normal as Vector3).y >= 0.7:
+			break
+	if not top or (top.normal as Vector3).y < 0.7:
+		if OS.is_debug_build() and world.has_meta("debug_mantle"):
+			print("mantle: top not found or too steep: ", top)
+		return false
+	var rise: float = top.position.y - feet.y
+	if OS.is_debug_build() and world.has_meta("debug_mantle"):
+		print("mantle: wall at %s, top %s normal %s rise %.2f" % [wall_hit.position, top.position, top.normal, rise])
+	if rise < 0.4 or rise > MANTLE_REACH:
+		return false
+	# Room to stand up there?
+	var q3 := PhysicsRayQueryParameters3D.create(top.position + Vector3(0, 0.05, 0), top.position + Vector3(0, 1.8, 0), 1 | 4)
+	q3.exclude = [get_rid()]
+	if space.intersect_ray(q3):
+		return false
+	_mantle_from = global_position
+	_mantle_to = top.position + Vector3(0, 0.05, 0)
+	_mantle_t = 0.0
+	velocity = Vector3.ZERO
+	return true
+
+
+func _update_mantle(dt: float) -> void:
+	_mantle_t += dt / MANTLE_TIME
+	var u := clampf(_mantle_t, 0.0, 1.0)
+	# Up first, then over the edge.
+	var up := smoothstep(0.0, 0.7, u)
+	var over := smoothstep(0.45, 1.0, u)
+	global_position = Vector3(lerpf(_mantle_from.x, _mantle_to.x, over), lerpf(_mantle_from.y, _mantle_to.y, up), lerpf(_mantle_from.z, _mantle_to.z, over))
+	_bob += dt * 6.0
+	if u >= 1.0:
+		_mantle_t = -1.0
+		velocity = Vector3.ZERO
+
+
+## Ladders: walk into one and hold W to climb, S to go down, Space to let go. Steps off at the top.
+func _update_ladder(dt: float, inp: Vector2) -> bool:
+	var l: Dictionary = world.ladder_near(global_position)
+	var fwd := -global_basis.z
+	if l.is_empty() or (not climbing and (inp.y > -0.3 or fwd.dot(-(l.out as Vector3)) < 0.3)):
+		climbing = false
+		return false
+	if Input.is_action_just_pressed("jump"):
+		climbing = false
+		velocity = (l.out as Vector3) * 2.5 + Vector3(0, 1.0, 0)
+		return false
+	climbing = true
+	var top: float = (l.base as Vector3).y + float(l.h)
+	if global_position.y >= top - 0.05 and inp.y < -0.3:
+		# Off the top and onto the roof.
+		_mantle_from = global_position
+		var over := Vector3(l.base.x, top, l.base.z) - (l.out as Vector3) * 0.9
+		var q := PhysicsRayQueryParameters3D.create(over + Vector3(0, 1.5, 0), over - Vector3(0, 2.0, 0), 1 | 4)
+		q.exclude = [get_rid()]
+		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		_mantle_to = (hit.position if hit else over) + Vector3(0, 0.05, 0)
+		_mantle_t = 0.0
+		climbing = false
+		return true
+	var target_xz: Vector3 = (l.base as Vector3) + (l.out as Vector3) * 0.42
+	global_position.x = lerpf(global_position.x, target_xz.x, 1.0 - exp(-12.0 * dt))
+	global_position.z = lerpf(global_position.z, target_xz.z, 1.0 - exp(-12.0 * dt))
+	velocity = Vector3(0, -inp.y * 2.4, 0)
+	move_and_slide()
+	if is_on_floor() and inp.y > 0.3:
+		climbing = false
+	_bob += absf(inp.y) * dt * 5.0
+	return true
+
+
 func _process(dt: float) -> void:
 	if not active:
 		return
@@ -159,7 +279,7 @@ func _process(dt: float) -> void:
 		var to := from - camera.global_transform.basis.z * float(t.reach)
 		var q := PhysicsRayQueryParameters3D.create(from, to, 1 | 4)
 		var hit := get_world_3d().direct_space_state.intersect_ray(q)
-		if hit and hit.collider.collision_layer == 1 and not (world.cart and world.cart.pushing):
+		if hit and hit.collider.collision_layer == 1 and not (world.cart and world.cart.pushing) and not world.placing:
 			aim_valid = world.rust.value_at(hit.position.x, hit.position.z) > 0
 			if Input.is_action_pressed("clean"):
 				cleaning = world.player_clean(hit.position, t, dt)
