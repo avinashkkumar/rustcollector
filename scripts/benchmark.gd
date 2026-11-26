@@ -322,7 +322,7 @@ func _run_rover(u: float) -> void:
 	world.sweeper.autopilot_place(pos, heading, spd)
 	# The charger cart trails the sweeper with its charge cable connected.
 	var a2 := a - 0.22
-	var pos2 := SWEEP_CIRCLE + Vector3(cos(a2), 0, sin(a2)) * (r + 2.5)
+	var pos2 := SWEEP_CIRCLE + Vector3(cos(a2), 0, sin(a2)) * (r + 4.4)  # outside the swept swath so its tracks show
 	var t2 := Vector3(-sin(a2), 0, cos(a2))
 	world.charger.autopilot_place(pos2, atan2(-t2.x, -t2.z), spd)
 	world.sweeper.energy = world.sweeper.battery * 0.5  # keeps the cart charging over the cable
