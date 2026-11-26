@@ -21,6 +21,10 @@ var _bob := 0.0
 var _built_tool := -1
 var _step := 0.0
 var _left_foot := false
+var torch_on := false
+var torch_root: Node3D
+var torch_light: SpotLight3D
+var _torch_lens: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -44,6 +48,49 @@ func _ready() -> void:
 	tool_root.position = Vector3(0.36, -0.44, -0.95)
 	camera.add_child(tool_root)
 	refresh_tool()
+	_build_torch()
+
+
+## Hand torch (L): a small lamp in the left hand. The beam trails the view slightly, like a real
+## torch held in a hand, and casts shadows on presets that allow light shadows.
+func _build_torch() -> void:
+	torch_root = Node3D.new()
+	torch_root.position = Vector3(-0.42, -0.42, -0.75)
+	camera.add_child(torch_root)
+	var body := _mesh_node(_cyl(0.035, 0.24, 0.03), Color(0.16, 0.16, 0.18), 0.0)
+	body.rotation_degrees.x = 90.0
+	torch_root.add_child(body)
+	var head := _mesh_node(_cyl(0.05, 0.07, 0.036), Color(0.75, 0.55, 0.2), 0.0)
+	head.rotation_degrees.x = 90.0
+	head.position.z = -0.15
+	torch_root.add_child(head)
+	var lens := _mesh_node(_cyl(0.042, 0.01), Color(1.0, 0.95, 0.8), 0.0)
+	lens.rotation_degrees.x = 90.0
+	lens.position.z = -0.19
+	_torch_lens = lens.material_override
+	torch_root.add_child(lens)
+	torch_light = SpotLight3D.new()
+	torch_light.top_level = true  # follows the camera with a little lag (see _process)
+	torch_light.spot_range = 34.0
+	torch_light.spot_angle = 26.0
+	torch_light.spot_angle_attenuation = 0.6
+	torch_light.spot_attenuation = 0.9
+	torch_light.light_energy = 5.0
+	torch_light.light_color = Color(1.0, 0.94, 0.82)
+	torch_light.light_volumetric_fog_energy = 0.4
+	add_child(torch_light)
+	set_torch(false)
+
+
+func set_torch(on: bool) -> void:
+	torch_on = on
+	torch_light.visible = on and active
+	torch_root.visible = active
+	_torch_lens.emission_enabled = on
+	_torch_lens.emission = Color(1.0, 0.92, 0.75)
+	_torch_lens.emission_energy_multiplier = 4.0
+	if world and world.params:
+		torch_light.shadow_enabled = bool(world.params.omni_shadows)
 
 
 func set_active(on: bool) -> void:
@@ -54,6 +101,8 @@ func set_active(on: bool) -> void:
 	if on:
 		camera.current = true
 		velocity = Vector3.ZERO
+	if torch_light:
+		torch_light.visible = torch_on and on
 
 
 func _unhandled_input(e: InputEvent) -> void:
@@ -157,7 +206,20 @@ func refresh_tool() -> void:
 			tool_head.add_child(_mesh_node(s, col, 2.5))
 
 
+func _update_torch(dt: float) -> void:
+	if not torch_on:
+		return
+	var src := torch_root.global_transform
+	var t := torch_light.global_transform
+	# Position follows the hand exactly; the aim catches up with the view over ~0.1 s.
+	t.origin = src.origin + src.basis.z * -0.2
+	t.basis = t.basis.slerp(camera.global_basis.orthonormalized(), 1.0 - exp(-12.0 * dt)).orthonormalized()
+	torch_light.global_transform = t
+
+
 func _animate_tool(dt: float) -> void:
+	_update_torch(dt)
+	torch_root.position.y = -0.42 + sin(_bob + 1.3) * 0.01
 	_anim += dt * (16.0 if cleaning else 0.0)
 	var target := Vector3(0.36, -0.44, -0.95)
 	if cleaning:

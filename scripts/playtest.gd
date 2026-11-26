@@ -17,6 +17,7 @@ func run() -> void:
 	await _kit_flow()
 	await _paint_flow()
 	await _key_guide_flow()
+	await _torch_flow()
 	await _save_flow()
 	await _worlds_flow()
 	await _menu_flow()
@@ -321,6 +322,39 @@ func _menu_flow() -> void:
 	check(played.size() == 2 and played[-1][1] == true and made.name == "Hellas Camp" and made.seed == Worlds.parse_seed("dusty"),
 		"Create & play makes the world with that name and seed and starts it as new")
 	layer.queue_free()
+
+
+func _torch_flow() -> void:
+	print("[torch]")
+	var p := world.player
+	world.state.time_of_day = 0.0  # midnight
+	await _stand_near(Vector3(20, 0, 30), Vector3.ZERO, Vector3(20, 0, 10))
+	p.pitch = -0.3
+	await get_tree().create_timer(0.3).timeout
+	check(not p.torch_on and not p.torch_light.visible, "torch starts off")
+	check(world.hud.toast_box.get_children().any(func(c: Node) -> bool: return c is Label and (c as Label).text.contains("Press L")), "at night the game hints to press L")
+	await _shot("8a_night_no_torch")
+	await _press("torch")
+	await _frames(10)
+	check(p.torch_on and p.torch_light.visible, "L turns the torch on")
+	await _shot("8b_night_torch")
+	await _press("torch")
+	check(not p.torch_light.visible, "L again turns it off")
+	await _press("torch")
+	var v := world.sweeper
+	world.plugged.erase(v)
+	p.set_active(false)
+	v.set_driving(true)
+	await _frames(4)
+	check(not p.torch_light.visible, "torch beam is hidden while driving")
+	await _press("torch")
+	var lit := v.headlights_lit()
+	await _press("torch")
+	check(lit != v.headlights_lit(), "L while driving toggles the headlights")
+	world._exit_vehicle(v)
+	await _frames(4)
+	check(p.torch_light.visible, "torch comes back on when you get out")
+	world.state.time_of_day = 0.35
 
 
 func _save_flow() -> void:

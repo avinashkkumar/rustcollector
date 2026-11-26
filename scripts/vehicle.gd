@@ -399,9 +399,18 @@ func _unhandled_input(e: InputEvent) -> void:
 		snap_camera()
 
 
+var lights_override := -1  # -1 automatic (on at night), 0 off, 1 on: set with L while driving
+
+
 func set_headlights(on: bool) -> void:
+	if lights_override >= 0:
+		on = lights_override == 1
 	for h in headlights:
 		h.visible = on
+
+
+func headlights_lit() -> bool:
+	return not headlights.is_empty() and headlights[0].visible
 
 
 # ---------------------------------------------------------------- models

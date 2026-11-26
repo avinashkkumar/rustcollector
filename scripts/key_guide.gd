@@ -29,6 +29,7 @@ const BINDS := {
 	"T": ["both", "Mark", "Mark", "Set a waypoint where you look (again to remove)"],
 	"M": ["both", "Map", "Map", "Big map"],
 	"H": ["both", "Hex", "Hex", "Hexagon grid on / off"],
+	"L": ["both", "Torch", "Lights", "Torch on or off / Headlights on or off"],
 }
 # rows of [label, width in key units]; "" = gap
 const ROWS := [
@@ -100,7 +101,7 @@ func _draw() -> void:
 			continue
 		var parts := str(b[3]).split(" / ")
 		var desc: String = b[3]
-		if b[0] == "both" and parts.size() == 2 and label in ["W", "A", "S", "D", "Shift", "Space", "E"]:
+		if b[0] == "both" and parts.size() == 2 and label in ["W", "A", "S", "D", "Shift", "Space", "E", "L"]:
 			desc = parts[1] if driving else parts[0]
 		draw_string(font, Vector2(tx, ty), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, _ctx_color(b[0]))
 		draw_string(font, Vector2(tx + 58, ty), desc, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 70.0, 15, Color(1, 1, 1, 0.9))

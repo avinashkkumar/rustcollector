@@ -191,6 +191,7 @@ func _setup_input() -> void:
 	_key("vehicle_tool", [KEY_R])
 	_key("vehicle_empty", [KEY_Q])
 	_key("waypoint", [KEY_T])
+	_key("torch", [KEY_L])
 	_key("camera_toggle", [KEY_V])
 	_key("use_kit", [KEY_G])
 	_key("use_cell", [KEY_B])

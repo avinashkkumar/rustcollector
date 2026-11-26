@@ -825,7 +825,7 @@ func _process(dt: float) -> void:
 
 
 var _sky_t := 0.0
-var _headlamp: SpotLight3D
+var _dark_hinted := false
 
 
 ## Slow, relaxed day/night cycle. Panels only generate while the sun is up.
@@ -848,14 +848,13 @@ func _update_daycycle(dt: float) -> void:
 	for l in base_lights:
 		l.light_energy = lerpf(3.0, 1.2, day)
 	var night := 1.0 - day
-	if _headlamp == null:
-		_headlamp = SpotLight3D.new()
-		_headlamp.spot_range = 26.0
-		_headlamp.spot_angle = 34.0
-		_headlamp.light_color = Color(1.0, 0.95, 0.85)
-		player.camera.add_child(_headlamp)
-	_headlamp.visible = night > 0.3
-	_headlamp.light_energy = 2.2 * night
+	# Once per evening, remind the player about the torch if it is off.
+	if night > 0.45 and not _dark_hinted:
+		_dark_hinted = true
+		if not player.torch_on and player.active:
+			hud.toast("It's getting dark. Press L for your torch.", 5.0)
+	elif night < 0.2:
+		_dark_hinted = false
 	for v in [sweeper, charger]:
 		v.set_headlights(night > 0.3 or params.headlights and night > 0.05)
 	# Sky colours change slowly; updating them is cheap only if done rarely.
@@ -1017,6 +1016,15 @@ func _unhandled_input(e: InputEvent) -> void:
 		sfx("forceField_001")
 	elif e.is_action_pressed("vehicle_empty") and driven() == sweeper:
 		empty_hopper()
+	elif e.is_action_pressed("torch") and not ui_open:
+		var dv := driven()
+		if dv:
+			dv.lights_override = 0 if dv.headlights_lit() else 1
+			dv.set_headlights(false)
+			hud.toast("Headlights %s." % ("on" if dv.headlights_lit() else "off"), 1.2)
+		elif player.active:
+			player.set_torch(not player.torch_on)
+		sfx("computerNoise_002")
 	elif e.is_action_pressed("waypoint"):
 		_place_waypoint()
 	elif e.is_action_pressed("use_kit") and _near_vehicle and player.active and state.repair_kits > 0:
