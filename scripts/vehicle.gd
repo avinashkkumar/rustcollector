@@ -36,7 +36,8 @@ var brake := 9.0
 var wheelbase := 2.5
 var track := 2.44
 var drive_kw := 1.6  # draw at full throttle
-var sweep_kw := 1.2
+var sweep_kw := 1.2  # at top speed
+const IDLE_KW := 0.05  # lights and electronics
 
 # Component condition, 1 = new, 0 = failed. Shared with GameState.wear so it is saved.
 var cond := {tyres = 1.0, brush = 1.0, motor = 1.0}
@@ -236,8 +237,7 @@ func _physics_process(dt: float) -> void:
 				world.sfx("impactMetal_002")
 	# Battery drain (game time runs at TIME_SCALE).
 	if driving:
-		# Boost costs ~3.4x the power for ~1.5x the speed: more kWh per kilometre.
-		var draw := (absf(throttle) * drive_kw * (3.4 if boosting else 1.0) * (1.0 + 0.5 * (1.0 - float(cond.motor))) + (sweep_kw if sweeping else 0.0) + 0.15) * float(world.state.diff().drain)
+		var draw := (drive_power(throttle) * (1.0 + 0.5 * (1.0 - float(cond.motor))) + (brush_power() if sweeping else 0.0) + IDLE_KW) * float(world.state.diff().drain)
 		energy = maxf(energy - draw * dt / GameState.TIME_SCALE, 0.0)
 		if energy > 0.5 and float(cond.motor) > 0.0:
 			flat_warned = false
@@ -406,9 +406,34 @@ func _unhandled_input(e: InputEvent) -> void:
 		var st := world.state
 		var step := 0.1 if e.button_index == MOUSE_BUTTON_WHEEL_UP else -0.1
 		st.drive_limit = clampf(snappedf(st.drive_limit + step, 0.1), 0.2, 1.0)
-		world.hud.toast("Speed limit %d km/h  (%d%%)  ·  scroll to change, Shift to boost past it" % [
-			roundi(top_speed() * limit() * 3.6), roundi(st.drive_limit * 100.0)], 1.6)
+		var lim := top_speed() * limit() * 3.6
+		world.hud.toast("Speed limit %d km/h  ·  range ~%.1f km  ·  slower goes further, Shift boosts past it" % [
+			roundi(lim), range_at(lim)], 1.6)
 		get_viewport().set_input_as_handled()
+
+
+## Motor power (kW) at the current speed. Drag and rolling losses grow with the square of speed,
+## so the energy per kilometre grows with speed: driving slower stretches the battery. Accelerating
+## costs extra on top, and boost (Shift) pays a further 1.8x penalty.
+func drive_power(throttle: float) -> float:
+	var frac := absf(speed) / max_speed
+	var cruise := drive_kw * frac * frac
+	var pushing := drive_kw * 0.3 * absf(throttle) * clampf(1.0 - frac / maxf(limit(), 0.2), 0.0, 1.0)
+	return (cruise + pushing) * (1.8 if boosting else 1.0)
+
+
+## The roller works on the ground it covers, so its draw follows speed (a little to spin it
+## while standing still).
+func brush_power() -> float:
+	return maxf(sweep_kw * absf(speed) / max_speed, 0.1)
+
+
+## Estimated km left driving steadily at `kmh`.
+func range_at(kmh_now: float) -> float:
+	var v := kmh_now / 3.6
+	var frac := v / max_speed
+	var kw := (drive_kw * frac * frac * (1.0 + 0.5 * (1.0 - float(cond.motor))) + (maxf(sweep_kw * frac, 0.1) if tool_on else 0.0) + IDLE_KW) * float(world.state.diff().drain)
+	return energy / kw * GameState.TIME_SCALE * v / 1000.0
 
 
 ## Fraction of top speed the mouse-wheel limiter allows (the benchmark has no limiter).
