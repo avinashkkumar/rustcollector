@@ -59,6 +59,24 @@ const RELICS := [
 	{name = "Tiffin box (still sealed!)", value = 1111}, {name = "Gold-foil probe panel", value = 9000},
 	{name = "Fossil-like rock fern", value = 12000}, {name = "Founders' plaque", value = 15000},
 ]
+# Contractor ranks by lifetime earnings; each rank adds +3% to the export price.
+const RANKS := [
+	{name = "Rust Rookie", earned = 0}, {name = "Dust Walker", earned = 20000},
+	{name = "Grit Grinder", earned = 60000}, {name = "Plain Sweeper", earned = 150000},
+	{name = "Hex Hunter", earned = 300000}, {name = "Crater Captain", earned = 600000},
+	{name = "Iron Oxide Ace", earned = 1200000}, {name = "Red Planet Elite", earned = 2500000},
+	{name = "Martian Master", earned = 5000000}, {name = "Legend of Rustfall", earned = 10000000},
+]
+const RANK_BONUS := 0.03
+# Paint jobs for vehicles (cosmetic). primary/secondary replace the body colours.
+const LIVERIES := [
+	{id = "factory", name = "Factory", cost = 0},
+	{id = "saffron", name = "Saffron Strike", cost = 15000, primary = Color(1.0, 0.58, 0.1), secondary = Color(0.98, 0.97, 0.93), metal = 0.2},
+	{id = "nightops", name = "Night Ops", cost = 20000, primary = Color(0.13, 0.14, 0.16), secondary = Color(0.3, 0.32, 0.35), metal = 0.4},
+	{id = "tiger", name = "Desert Tiger", cost = 25000, primary = Color(0.78, 0.62, 0.38), secondary = Color(0.36, 0.26, 0.16), metal = 0.1},
+	{id = "neon", name = "Neon Pulse", cost = 40000, primary = Color(0.32, 0.12, 0.6), secondary = Color(0.1, 0.85, 0.8), metal = 0.3},
+	{id = "chrome", name = "Chrome Rover", cost = 60000, primary = Color(0.86, 0.87, 0.9), secondary = Color(0.6, 0.62, 0.66), metal = 1.0},
+]
 const SOL_SECONDS := 960.0  # one Martian day lasts 16 real minutes
 
 const TANKS := [
@@ -86,6 +104,13 @@ var charger_energy := CHARGER_BATT
 var vehicles := {}  # name -> [x, y, z, heading] last parked position
 var wear := {sweeper = {tyres = 1.0, brush = 1.0, motor = 1.0}, charger = {tyres = 1.0, motor = 1.0}}
 var repairs_done := 0
+var repair_kits := 0
+var battery_cells := 0
+var pods_opened := 0
+var liveries := {sweeper = ["factory"], charger = ["factory"]}
+var livery := {sweeper = "factory", charger = "factory"}
+var sol_start := {}  # snapshot at the start of the current sol, for the end-of-sol report
+var sol_kg := {you = 0.0, sweeper = 0.0, drones = 0.0}
 var total_sold := 0.0
 var collected := 0.0  # kg ever picked up
 var earned := 0.0  # ₹ ever earned
@@ -144,10 +169,27 @@ func gen_kw() -> float:
 	return panels * PANEL_KW
 
 
-## The off-world rust price drifts slowly between roughly ₹19 and ₹32 per kg.
+## The off-world rust price drifts slowly between roughly ₹19 and ₹32 per kg; ranks add a bonus.
 func price_now() -> float:
 	var t := play_time / 240.0
-	return SELL_PRICE * (1.0 + 0.16 * sin(t * 0.9) + 0.08 * sin(t * 2.3 + 1.7))
+	return SELL_PRICE * (1.0 + 0.16 * sin(t * 0.9) + 0.08 * sin(t * 2.3 + 1.7)) * (1.0 + RANK_BONUS * rank_index())
+
+
+func rank_index() -> int:
+	var r := 0
+	for i in RANKS.size():
+		if earned >= float(RANKS[i].earned):
+			r = i
+	return r
+
+
+func rank_name() -> String:
+	return RANKS[rank_index()].name
+
+
+func start_sol_report() -> void:
+	sol_start = {earned = earned, hexes = hexes_cleared.size(), relics = relics_found.size(), pods = pods_opened}
+	sol_kg = {you = 0.0, sweeper = 0.0, drones = 0.0}
 
 
 ## 0 at night, 1 at noon. Solar panels follow this.
@@ -191,7 +233,9 @@ func to_dict() -> Dictionary:
 		sweeper_energy = sweeper_energy, charger_energy = charger_energy, vehicles = vehicles,
 		total_sold = total_sold, hexes_cleared = hexes_cleared, drone_range = drone_range,
 		collected = collected, earned = earned, missions_done = missions_done, story_seen = story_seen,
-		relics_found = relics_found, wear = wear, repairs_done = repairs_done, dig_meter = dig_meter, next_relic_kg = next_relic_kg, time_of_day = time_of_day, sol = sol,
+		relics_found = relics_found, wear = wear, repairs_done = repairs_done, repair_kits = repair_kits,
+		battery_cells = battery_cells, pods_opened = pods_opened, liveries = liveries, livery = livery,
+		sol_start = sol_start, sol_kg = sol_kg, dig_meter = dig_meter, next_relic_kg = next_relic_kg, time_of_day = time_of_day, sol = sol,
 		player_pos = [player_pos.x, player_pos.y, player_pos.z], player_yaw = player_yaw, play_time = play_time,
 	}
 
@@ -224,6 +268,18 @@ func from_dict(d: Dictionary) -> void:
 	story_seen = d.get("story_seen", true)
 	relics_found = d.get("relics_found", [])
 	repairs_done = int(d.get("repairs_done", 0))
+	repair_kits = int(d.get("repair_kits", 0))
+	battery_cells = int(d.get("battery_cells", 0))
+	pods_opened = int(d.get("pods_opened", 0))
+	var lv: Dictionary = d.get("liveries", {})
+	var la: Dictionary = d.get("livery", {})
+	for kind in liveries:
+		liveries[kind] = lv.get(kind, ["factory"])
+		livery[kind] = la.get(kind, "factory")
+	sol_start = d.get("sol_start", {})
+	var sk: Dictionary = d.get("sol_kg", {})
+	for k in sol_kg:
+		sol_kg[k] = float(sk.get(k, 0.0))
 	var w: Dictionary = d.get("wear", {})
 	for kind in wear:
 		for part in wear[kind]:

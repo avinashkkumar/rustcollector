@@ -12,6 +12,7 @@ var batt_lbl: Label
 var batt_bar: ProgressBar
 var grid_lbl: Label
 var wear_lbl: Label
+var rank_lbl: Label
 var tool_lbl: Label
 var stats_lbl: Label
 var mission_title: Label
@@ -78,6 +79,8 @@ func _build_stats() -> void:
 	pc.add_child(vb)
 	credits_lbl = UiKit.label("₹0", 30, UiKit.ACCENT)
 	vb.add_child(credits_lbl)
+	rank_lbl = UiKit.label("", 13, UiKit.MUTED)
+	vb.add_child(rank_lbl)
 	load_lbl = UiKit.label("", 15, UiKit.MUTED)
 	vb.add_child(load_lbl)
 	load_bar = _bar(UiKit.ACCENT)
@@ -204,6 +207,31 @@ func toast(msg: String, secs := 3.0, color := Color(1, 0.92, 0.8)) -> void:
 	tw.tween_callback(l.queue_free)
 
 
+## CS-style end-of-round card, shown at the end of every sol. Fades out on its own.
+func sol_report(d: Dictionary) -> void:
+	var pc := PanelContainer.new()
+	pc.anchor_left = 0.5
+	pc.anchor_right = 0.5
+	pc.offset_left = -230
+	pc.offset_right = 230
+	pc.offset_top = 70
+	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(pc)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 4)
+	pc.add_child(vb)
+	vb.add_child(UiKit.label("SOL %d COMPLETE" % d.sol, 24, UiKit.ACCENT))
+	vb.add_child(UiKit.label("%s kg of rust  ·  %s earned" % [_fmt_int(int(d.kg)), GameState.inr(d.earned)], 18))
+	vb.add_child(UiKit.label("%d hexagons  ·  %d relics  ·  %d supply pods" % [d.hexes, d.relics, d.pods], 16, UiKit.MUTED))
+	if float(d.kg) > 0.0:
+		var who := {you = "You (on foot)", sweeper = "The Sweeper", drones = "The drone fleet"}
+		vb.add_child(UiKit.label("MVP: %s  (%d%% of the rust)" % [who[d.mvp], roundi(float(d.mvp_share) * 100.0)], 16, UiKit.ACCENT2))
+	var tw := pc.create_tween()
+	tw.tween_interval(10.0)
+	tw.tween_property(pc, "modulate:a", 0.0, 1.0)
+	tw.tween_callback(pc.queue_free)
+
+
 func mission_complete(m: Dictionary) -> void:
 	toast("MISSION COMPLETE: %s   +%s" % [m.title, GameState.inr(m.reward)], 5.0, Color(0.55, 0.95, 1.0))
 
@@ -244,6 +272,8 @@ func _update_text() -> void:
 	var s := world.state
 	var v := world.driven()
 	credits_lbl.text = GameState.inr(s.credits)
+	var r := s.rank_index()
+	rank_lbl.text = "%s%s" % [s.rank_name(), "" if r == 0 else "  ·  exports +%d%%" % roundi(r * GameState.RANK_BONUS * 100.0)]
 	if v == world.sweeper:
 		load_lbl.text = "Hopper %.0f / %.0f kg · brush %s" % [s.hopper, GameState.SWEEPER_HOPPER, "on" if v.tool_on else "off"]
 		load_bar.max_value = GameState.SWEEPER_HOPPER
@@ -294,10 +324,10 @@ func _update_text() -> void:
 		" · bonus paid" if done else "", s.sol, hh, mm, GameState.inr(s.price_now())]
 	hint_lbl.visible = s.play_time < 180.0 or Input.is_key_pressed(KEY_F1)
 	if v:
-		hint_lbl.text = "WASD drive · Shift boost (more power per km) · Space handbrake · %sE exit · M map · H hex grid · Esc menu" % [
+		hint_lbl.text = "WASD drive · Shift boost · Space handbrake · mouse look · V camera · %sT waypoint · E exit · M map · Esc menu" % [
 			"R brush on/off · Q empty hopper · " if v == world.sweeper else ""]
 	else:
-		hint_lbl.text = "WASD move · Shift sprint · Space jump · LMB/F clean · E interact · M map · H hex grid · F3 FPS · Esc menu"
+		hint_lbl.text = "WASD move · Shift sprint · Space jump · LMB/F clean · E interact · T waypoint · M map · H hex grid · F1 help · Esc menu"
 
 
 static func _fmt_int(n: int) -> String:
@@ -394,6 +424,15 @@ func _refresh_shop() -> void:
 			elif not in_bay:
 				desc += " Park it in its garage bay (or tow it) to repair."
 			_row("%s: %s" % [veh.display_name(), GameState.PART_NAMES[part]], desc, "repair_%s_%s" % [veh.kind, part])
+	_section("PAINT SHOP")
+	for veh in [world.sweeper, world.charger]:
+		if not world.owns(veh):
+			continue
+		for lv in GameState.LIVERIES:
+			var owned: bool = (s.liveries[veh.kind] as Array).has(lv.id)
+			var on: bool = s.livery[veh.kind] == lv.id
+			var desc := "Applied." if on else ("Owned: apply for free." if owned else "Cosmetic paint job.")
+			_row("%s: %s" % [veh.display_name(), lv.name], desc, "paint_%s_%s" % [veh.kind, lv.id])
 	_section("DRONES")
 	_row("Cleaning drone  (%d/%d)" % [s.drones, GameState.MAX_DRONES], "Works on its own inside the drone zone; exports remotely at 50%.", "drone")
 	_row("Drone relay range  (%d ring%s)" % [s.drone_range, "" if s.drone_range == 1 else "s"],
@@ -412,7 +451,7 @@ func _row(title: String, desc: String, item: String) -> void:
 	hb.add_child(vb)
 	var cost := world.price(item) if item != "" else -1
 	if cost >= 0:
-		var b := UiKit.button("Buy  %s" % GameState.inr(cost), func() -> void:
+		var b := UiKit.button(("Buy  %s" % GameState.inr(cost)) if cost > 0 else "Apply", func() -> void:
 			if world.buy(item):
 				toast("Purchased: %s" % title, 2.5)
 			_refresh_shop(), 190)

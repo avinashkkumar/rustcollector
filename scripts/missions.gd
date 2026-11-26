@@ -16,6 +16,7 @@ const LIST := [
 	{id = "hex5", title = "Clearing the plain", desc = "Clean 5 hexagons.", reward = 8000},
 	{id = "charger", title = "Lifeline", desc = "Buy the Charger cart, so nobody gets stranded.", reward = 6000},
 	{id = "repair", title = "Grease monkey", desc = "Repair a worn vehicle part at the garage (base terminal, Workshop).", reward = 4000},
+	{id = "pod", title = "Special delivery", desc = "Open a supply pod (they land somewhere on the plain; follow the beacon).", reward = 3000},
 	{id = "drones2", title = "Automation", desc = "Deploy 2 cleaning drones.", reward = 10000},
 	{id = "export5t", title = "Five tonnes", desc = "Export 5,000 kg of rust in total.", reward = 20000},
 	{id = "panels15", title = "Solar farm", desc = "Own 15 solar panels.", reward = 25000},
@@ -58,6 +59,8 @@ func progress(s: GameState, id: String) -> float:
 			return 1.0 if s.charger_owned else 0.0
 		"repair":
 			return 1.0 if s.repairs_done > 0 else 0.0
+		"pod":
+			return 1.0 if s.pods_opened > 0 else 0.0
 		"drones2":
 			return s.drones / 2.0
 		"export5t":
