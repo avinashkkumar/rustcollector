@@ -4,8 +4,17 @@ extends RefCounted
 ## Everything that cleans (hand tools, vacuum lances, the sweeper vehicle, drones)
 ## collects the same Martian rust, which is exported from the base for rupees.
 
-const SAVE_PATH := "user://save.json"
-const RUST_PATH := "user://save_rust.bin"
+## Folder the save lives in. Developer runs (--playtest, --debug-shot) switch this to
+## "user://dev/" so they never touch the player's real save.
+static var save_dir := "user://"
+
+
+static func save_path() -> String:
+	return save_dir + "save.json"
+
+
+static func rust_path() -> String:
+	return save_dir + "save_rust.bin"
 
 const SELL_PRICE := 25.0  # ₹ per kg of rust exported
 const DRONE_SHARE := 0.5  # drones export remotely at half price
@@ -295,10 +304,11 @@ func from_dict(d: Dictionary) -> void:
 
 
 func save(rust: RustField) -> void:
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	DirAccess.make_dir_recursive_absolute(save_dir)
+	var f := FileAccess.open(save_path(), FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(to_dict(), "  "))
-	var r := FileAccess.open(RUST_PATH, FileAccess.WRITE)
+	var r := FileAccess.open(rust_path(), FileAccess.WRITE)
 	if r:
 		r.store_var(rust.to_save())
 
@@ -306,12 +316,12 @@ func save(rust: RustField) -> void:
 func load_into(rust: RustField) -> bool:
 	if not has_save():
 		return false
-	var d = JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))
+	var d = JSON.parse_string(FileAccess.get_file_as_string(save_path()))
 	if typeof(d) != TYPE_DICTIONARY:
 		return false
 	from_dict(d)
-	if FileAccess.file_exists(RUST_PATH):
-		var r := FileAccess.open(RUST_PATH, FileAccess.READ)
+	if FileAccess.file_exists(rust_path()):
+		var r := FileAccess.open(rust_path(), FileAccess.READ)
 		var v = r.get_var()
 		if typeof(v) == TYPE_DICTIONARY:
 			rust.from_save(v)
@@ -319,10 +329,10 @@ func load_into(rust: RustField) -> bool:
 
 
 static func has_save() -> bool:
-	return FileAccess.file_exists(SAVE_PATH)
+	return FileAccess.file_exists(save_path())
 
 
 static func delete_save() -> void:
-	for p in [SAVE_PATH, RUST_PATH, "user://save_dust.bin"]:
+	for p in [save_path(), rust_path(), save_dir + "save_dust.bin"]:
 		if FileAccess.file_exists(p):
 			DirAccess.remove_absolute(p)

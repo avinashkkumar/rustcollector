@@ -17,6 +17,8 @@ var _story_shown := false
 
 func _ready() -> void:
 	var args := parse_args()
+	if args.has("playtest") or args.has("debug-shot"):
+		GameState.save_dir = "user://dev/"  # never overwrite or delete the player's real save
 	if args.has("playtest"):
 		_story_shown = true
 		start_game(false)
