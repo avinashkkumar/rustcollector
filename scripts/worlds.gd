@@ -35,7 +35,10 @@ static func list() -> Array[Dictionary]:
 				m.hexes = (d.get("hexes_cleared", []) as Array).size()
 				m.last_played = FileAccess.get_modified_time(save)
 		out.append(m)
-	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.last_played > b.last_played)
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if a.last_played == b.last_played:
+			return a.played and not b.played
+		return a.last_played > b.last_played)
 	return out
 
 
