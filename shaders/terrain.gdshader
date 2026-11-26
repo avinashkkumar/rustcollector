@@ -6,6 +6,7 @@ global uniform vec2 focus_hex;
 global uniform float hex_overlay;
 global uniform float terrain_pom;   // parallax steps (quality preset); 0 = off
 global uniform vec2 sun_xz;         // horizontal direction towards the sun
+global uniform float crust_scale;    // difficulty: crust rings (140/320/600 m) scaled by this
 
 // Per-chunk R8 mask: 1 = full rust layer, 0 = cleared down to bare rock.
 uniform sampler2D rust_mask : hint_default_white, filter_linear, repeat_disable;
@@ -89,6 +90,10 @@ void fragment() {
 	vec3 rock = mix(rock_b, rock_a, smoothstep(0.25, 0.75, n_mid)) * (0.75 + 0.45 * n_big);
 	rock *= 0.85 + 0.3 * n_fine; // gritty speckle
 	vec3 rust_c = mix(rust_b, rust_a, smoothstep(0.2, 0.8, n_big * 0.6 + n_fine * 0.4));
+	// Crust rings: harder rust further out reads darker and deeper red.
+	float cd = length(p) / max(crust_scale, 0.1);
+	float crust = smoothstep(132.0, 148.0, cd) * 0.45 + smoothstep(312.0, 328.0, cd) * 0.3 + smoothstep(592.0, 608.0, cd) * 0.25;
+	rust_c = mix(rust_c, rust_c * vec3(0.66, 0.42, 0.36), crust);
 
 	// Compacted rust in tyre tracks and footprints is darker and smoother.
 	// Crisp edge for the dent, and a lighter berm where the rust was pushed aside.

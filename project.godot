@@ -53,6 +53,11 @@ environment/defaults/default_clear_color=Color(0.08, 0.04, 0.03, 1)
 
 [shader_globals]
 
+crust_scale={
+"type": "float",
+"value": 1.0
+}
+
 focus_hex={
 "type": "vec2",
 "value": Vector2(0, 0)
