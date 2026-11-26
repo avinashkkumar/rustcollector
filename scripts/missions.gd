@@ -10,7 +10,7 @@ const LIST := [
 	{id = "mod", title = "Tinkerer", desc = "Earn a mastery star with your tool, then buy an upgrade (power, width or reach).", reward = 1500},
 	{id = "first_hex", title = "Hex by hex", desc = "Clean one hexagon to 90%.", reward = 2000},
 	{id = "tank", title = "Bigger loads", desc = "Upgrade your rust tank.", reward = 3000},
-	{id = "panel1", title = "First light", desc = "Buy your first solar panel at the terminal.", reward = 1500},
+	{id = "panel1", title = "First light", desc = "Buy a solar panel at the terminal, then press P to place it near the base.", reward = 1500},
 	{id = "pod", title = "Special delivery", desc = "Open a supply pod (they land somewhere on the plain; follow the beacon).", reward = 3000},
 	{id = "hex5", title = "Clearing the plain", desc = "Clean 5 hexagons.", reward = 8000},
 	{id = "panels4", title = "Power the base", desc = "Own 4 solar panels.", reward = 3000},

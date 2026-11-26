@@ -92,6 +92,7 @@ func _ready() -> void:
 		terrain.force_hi = true
 		terrain.preload_area(Vector3.ZERO, 4)
 		state.panels = 24
+		state.panel_spots = _legacy_panel_spots(24)
 		state.sweeper_owned = true
 		state.charger_owned = true
 	else:
@@ -285,19 +286,87 @@ func prop(model: String, x: float, z: float, yaw_deg := 0.0, scl := KIT, collide
 	add_child(holder)
 	holder.set_meta("size", aabb.size * scl)
 	if collide:
-		var body := StaticBody3D.new()
-		body.collision_layer = 4
-		body.collision_mask = 0
-		var cs := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = aabb.size * scl
-		cs.shape = box
-		cs.position.y = box.size.y * 0.5
-		body.add_child(cs)
-		body.position = holder.position
-		body.rotation.y = holder.rotation.y
-		add_child(body)
+		# Collide with the model's real surfaces (not its bounding box), so roofs, ramps and
+		# openings behave as they look. The Kenney models are low-poly, so this is cheap.
+		for mi in inst.find_children("*", "MeshInstance3D", true, false):
+			var mesh: Mesh = (mi as MeshInstance3D).mesh
+			if mesh == null:
+				continue
+			var body := StaticBody3D.new()
+			body.collision_layer = 4
+			body.collision_mask = 0
+			var cs := CollisionShape3D.new()
+			cs.shape = _trimesh_for(mesh)
+			body.add_child(cs)
+			mi.add_child(body)
 	return holder
+
+
+var _trimesh_cache := {}
+
+
+func _trimesh_for(mesh: Mesh) -> Shape3D:
+	if not _trimesh_cache.has(mesh):
+		var sh := mesh.create_trimesh_shape()
+		sh.backface_collision = true  # thin shells: solid from both sides
+		_trimesh_cache[mesh] = sh
+	return _trimesh_cache[mesh]
+
+
+# ---------------------------------------------------------------- ladders
+
+var ladders: Array[Dictionary] = []  # {base: Vector3 (foot of the ladder), out: Vector3 (away from the wall), h: float}
+
+
+## A ladder on the face of `holder` that points along `out` (world, horizontal), up to `h` metres.
+func _ladder_on(holder: Node3D, out: Vector3, h: float, along := 0.0) -> void:
+	var size: Vector3 = holder.get_meta("size")
+	var b := holder.global_basis.orthonormalized()
+	var half := absf(b.x.dot(out)) * size.x * 0.5 + absf(b.z.dot(out)) * size.z * 0.5
+	var side := out.cross(Vector3.UP).normalized()
+	var p := holder.global_position + out * (half + 0.12) + side * along
+	_ladder(Vector3(p.x, terrain.height_at(p.x, p.z), p.z), out, h)
+
+
+func _ladder(base: Vector3, out: Vector3, h: float) -> void:
+	ladders.append({base = base, out = out.normalized(), h = h})
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.95, 0.75, 0.2)
+	m.metallic = 0.5
+	m.roughness = 0.4
+	var root := Node3D.new()
+	add_child(root)
+	root.global_position = base
+	root.global_basis = Basis.looking_at(-out, Vector3.UP)
+	for x in [-0.28, 0.28]:
+		var rail := MeshInstance3D.new()
+		var rm := BoxMesh.new()
+		rm.size = Vector3(0.06, h + 1.0, 0.06)
+		rail.mesh = rm
+		rail.material_override = m
+		rail.position = Vector3(x, (h + 1.0) * 0.5, 0)
+		root.add_child(rail)
+	var rung := BoxMesh.new()
+	rung.size = Vector3(0.56, 0.04, 0.04)
+	var y := 0.3
+	while y < h + 0.2:
+		var r := MeshInstance3D.new()
+		r.mesh = rung
+		r.material_override = m
+		r.position = Vector3(0, y, 0)
+		root.add_child(r)
+		y += 0.35
+
+
+## The ladder the player can climb from here, or {}.
+func ladder_near(p: Vector3) -> Dictionary:
+	for l in ladders:
+		var d: Vector3 = p - l.base
+		var lateral := absf(d.dot((l.out as Vector3).cross(Vector3.UP)))
+		var front := d.dot(l.out)
+		if lateral < 0.55 and front > -0.1 and front < 0.9 and d.y > -0.3 and d.y < float(l.h) + 0.2:
+			return l
+	return {}
 
 
 func _label(text: String, pos: Vector3, color: Color, size := 64) -> Label3D:
@@ -357,9 +426,9 @@ func _build_base() -> void:
 	pad_body.add_child(pcs)
 	add_child(pad_body)
 
-	prop("hangar_largeA", -13, -5, 90, 4.2)
-	prop("hangar_roundGlass", 11, -12, 0, 3.0)
-	prop("hangar_smallA", -13, 11, 0, 3.0)
+	_ladder_on(prop("hangar_largeA", -13, -5, 90, 4.2), Vector3.RIGHT, 4.2, 2.5)
+	_ladder_on(prop("hangar_roundGlass", 11, -12, 0, 3.0), Vector3.FORWARD * -1.0, 3.6, 3.0)
+	_ladder_on(prop("hangar_smallA", -13, 11, 0, 3.0), Vector3.RIGHT, 3.0)
 	prop("machine_generatorLarge", DEPOT.x + 2.5, DEPOT.z, -90, 4.5)
 	prop("machine_barrelLarge", DEPOT.x + 4, DEPOT.z + 6, 0, 4.0)
 	prop("machine_barrel", DEPOT.x + 5.5, DEPOT.z - 6, 30, 3.5)
@@ -383,6 +452,8 @@ func _build_base() -> void:
 	add_child(chimney_fx)
 
 	_build_garage()
+	# Outside the roof's overhang (the roof reaches x + 7.3), so your head clears the eave.
+	_ladder(Vector3(GARAGE.x + 7.42, terrain.height_at(GARAGE.x + 7.42, GARAGE.z), GARAGE.z - 2.0), Vector3.RIGHT, 5.3)
 
 	_label("EXPORT DEPOT  [E]", DEPOT + Vector3(2.5, 4.5, 0), Color(1.0, 0.75, 0.45))
 	_label("BASE TERMINAL  [E]", TERMINAL + Vector3(-1, 2.8, 0), Color(0.6, 0.9, 1.0))
@@ -399,6 +470,8 @@ func _build_base() -> void:
 
 ## Solar panels you buy appear here; they feed the base battery bank.
 func _build_solar_field() -> void:
+	if state.panels > 0 and state.panel_spots.is_empty():
+		state.panel_spots = _legacy_panel_spots(state.panels)  # saves from before panels were placed by hand
 	var panel := BoxMesh.new()
 	panel.size = Vector3(3.0, 0.08, 1.8)
 	var pmat := StandardMaterial3D.new()
@@ -432,10 +505,170 @@ func _build_solar_field() -> void:
 	_refresh_solar()
 
 
+## Older saves (and the benchmark) had panels on a fixed grid: keep them where they were.
+func _legacy_panel_spots(n: int) -> Array:
+	var out := []
+	for i in n:
+		out.append([SOLAR_ORIGIN.x + (i % 10) * 4.0, SOLAR_ORIGIN.z - (i / 10) * 4.5, 0.0])
+	return out
+
+
+static func panel_transform(t: Terrain, spot: Array) -> Array[Transform3D]:
+	var x: float = spot[0]
+	var z: float = spot[1]
+	var h := t.height_at(x, z)
+	var yb := Basis(Vector3.UP, float(spot[2]))
+	return [Transform3D(yb * Basis(Vector3.RIGHT, deg_to_rad(-25)), Vector3(x, h + 1.45, z)), Transform3D(yb, Vector3(x, h + 0.7, z))]
+
+
+var _panel_bodies: Array[StaticBody3D] = []
+
+
 func _refresh_solar() -> void:
-	_solar_label.visible = state.panels > 0
+	state.panels = state.panel_spots.size()
+	_solar_label.visible = false
+	var poles: MultiMesh = solar.get_meta("poles")
+	for i in state.panel_spots.size():
+		var tr := panel_transform(terrain, state.panel_spots[i])
+		solar.set_instance_transform(i, tr[0])
+		poles.set_instance_transform(i, tr[1])
 	solar.visible_instance_count = state.panels
-	(solar.get_meta("poles") as MultiMesh).visible_instance_count = state.panels
+	poles.visible_instance_count = state.panels
+	# Solid panels: you can't walk through them (and can climb onto them).
+	for b in _panel_bodies:
+		b.queue_free()
+	_panel_bodies.clear()
+	for spot in state.panel_spots:
+		var tr := panel_transform(terrain, spot)
+		var body := StaticBody3D.new()
+		body.collision_layer = 4
+		for part in [[Vector3(3.0, 0.08, 1.8), tr[0]], [Vector3(0.15, 1.4, 0.15), tr[1]]]:
+			var cs := CollisionShape3D.new()
+			var bs := BoxShape3D.new()
+			bs.size = part[0]
+			cs.shape = bs
+			cs.transform = part[1]
+			body.add_child(cs)
+		add_child(body)
+		_panel_bodies.append(body)
+
+
+# ---------------------------------------------------------------- placing solar panels
+
+const PANEL_RANGE := 60.0  # metres from the base centre: panels must be on the base grid
+var placing := false
+var _ghost: Node3D
+var _ghost_mat: StandardMaterial3D
+var _ghost_yaw := 0.0
+var _ghost_spot := []
+var _ghost_why := ""
+
+
+func toggle_placing() -> void:
+	if placing:
+		_end_placing()
+		return
+	if state.panel_stock <= 0:
+		hud.toast("No solar panels to place. Buy them at the base terminal (Power tab).", 2.5)
+		return
+	if driven() or (cart and cart.pushing):
+		return
+	placing = true
+	if _ghost == null:
+		_ghost = Node3D.new()
+		_ghost_mat = StandardMaterial3D.new()
+		_ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		for part in [[Vector3(3.0, 0.08, 1.8), "panel"], [Vector3(0.15, 1.4, 0.15), "pole"]]:
+			var mi := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = part[0]
+			mi.mesh = bm
+			mi.material_override = _ghost_mat
+			mi.name = part[1]
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			_ghost.add_child(mi)
+		add_child(_ghost)
+	_ghost.visible = true
+
+
+func _end_placing() -> void:
+	placing = false
+	if _ghost:
+		_ghost.visible = false
+
+
+func _update_placing() -> String:
+	var cam := get_viewport().get_camera_3d()
+	var from := cam.global_position
+	var q := PhysicsRayQueryParameters3D.create(from, from - cam.global_basis.z * 14.0, 1 | 4)
+	q.exclude = [player.get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var at: Vector3
+	if hit:
+		at = hit.position
+	else:
+		at = from - cam.global_basis.z * 14.0
+	at = Vector3(snappedf(at.x, 0.5), 0.0, snappedf(at.z, 0.5))
+	_ghost_spot = [at.x, at.z, _ghost_yaw]
+	var tr := panel_transform(terrain, _ghost_spot)
+	(_ghost.get_node("panel") as Node3D).global_transform = tr[0]
+	(_ghost.get_node("pole") as Node3D).global_transform = tr[1]
+	_ghost_why = _panel_spot_problem(_ghost_spot, hit)
+	_ghost_mat.albedo_color = Color(0.3, 1.0, 0.45, 0.45) if _ghost_why == "" else Color(1.0, 0.3, 0.25, 0.45)
+	if _ghost_why != "":
+		return "Can't place here: %s   ·   R rotate · Esc/P cancel" % _ghost_why
+	return "[LMB] Place solar panel (%d left)   ·   R rotate · Esc/P cancel" % state.panel_stock
+
+
+func _panel_spot_problem(spot: Array, hit: Dictionary) -> String:
+	var p := Vector3(spot[0], 0, spot[1])
+	if hit.is_empty() or (hit.collider as CollisionObject3D).collision_layer != 1:
+		return "aim at open ground"
+	if Vector2(p.x, p.z).length() > PANEL_RANGE:
+		return "too far from the base grid (max %d m)" % int(PANEL_RANGE)
+	if terrain.normal_at(p.x, p.z).y < 0.95:
+		return "too steep"
+	if absf(p.x - GARAGE.x) < 8.5 and p.z > GARAGE.z - 7.0 and p.z < GARAGE.z + 12.0:
+		return "keep the garage and its entrance clear"
+	for keep in [DEPOT, TERMINAL]:
+		if _flat_dist(p, keep) < 5.5:
+			return "too close to the %s" % ("export depot" if keep == DEPOT else "terminal")
+	for other in state.panel_spots:
+		if Vector2(float(other[0]) - p.x, float(other[1]) - p.z).length() < 3.3:
+			return "too close to another panel"
+	var tr := panel_transform(terrain, spot)
+	var sq := PhysicsShapeQueryParameters3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(3.1, 1.6, 2.0)
+	sq.shape = box
+	sq.transform = Transform3D(tr[1].basis, tr[1].origin + Vector3(0, 0.25, 0))
+	sq.collision_mask = 4 | 8
+	if not get_world_3d().direct_space_state.intersect_shape(sq, 1).is_empty():
+		return "something is in the way"
+	return ""
+
+
+func place_panel() -> void:
+	if not placing or _ghost_why != "" or state.panel_stock <= 0:
+		if placing and _ghost_why != "":
+			_warn("Can't place here: " + _ghost_why)
+		return
+	state.panel_spots.append(_ghost_spot.duplicate())
+	state.panel_stock -= 1
+	_refresh_solar()
+	sfx("impactMetal_002")
+	hud.toast("Solar panel placed: %d installed, +%.0f kW in daylight." % [state.panels, state.gen_kw()], 2.5)
+	if state.panel_stock <= 0:
+		_end_placing()
+
+
+func _panel_near(p: Vector3) -> int:
+	for i in state.panel_spots.size():
+		var s: Array = state.panel_spots[i]
+		if Vector2(float(s[0]) - p.x, float(s[1]) - p.z).length() < 2.4:
+			return i
+	return -1
 
 
 ## Garage: back wall, side walls and roof, open to the south, with a charging post per bay.
@@ -1084,6 +1317,12 @@ func _update_interaction() -> void:
 	_act = ""
 	_act_vehicle = null
 	var v := driven()
+	if placing:
+		if v or not player.active:
+			_end_placing()
+		else:
+			hud.set_prompt(_update_placing())
+			return
 	if v == null:
 		var p := player.global_position
 		if _flat_dist(p, DEPOT) < 6.5:
@@ -1097,6 +1336,9 @@ func _update_interaction() -> void:
 		elif _flat_dist(p, TERMINAL) < 4.0:
 			prompt = "[E] Open base terminal  (upgrades · solar · vehicles)"
 			_act = "shop"
+		elif _panel_near(p) >= 0:
+			prompt = "[E] Pick up this solar panel (to move it)"
+			_act = "panel_pickup"
 		elif cart and cart.pushing:
 			prompt = "[E] Let go of the handcart  (%.0f / %.0f kg)" % [cart.load_kg, cart.capacity()]
 			_act = "cart_release"
@@ -1188,6 +1430,12 @@ func _unhandled_input(e: InputEvent) -> void:
 		elif player.active:
 			player.set_torch(not player.torch_on)
 		sfx("computerNoise_002")
+	elif e.is_action_pressed("place_panel") and player.active:
+		toggle_placing()
+	elif placing and e.is_action_pressed("clean"):
+		place_panel()
+	elif placing and e.is_action_pressed("vehicle_tool"):
+		_ghost_yaw = fmod(_ghost_yaw + PI / 4.0, TAU)
 	elif e.is_action_pressed("waypoint"):
 		_place_waypoint()
 	elif e.is_action_pressed("use_kit") and _near_vehicle and player.active and state.repair_kits > 0:
@@ -1222,6 +1470,13 @@ func _do_action() -> void:
 			sfx("computerNoise_002")
 		"open_pod":
 			_open_pod()
+		"panel_pickup":
+			var i := _panel_near(player.global_position)
+			if i >= 0:
+				state.panel_spots.remove_at(i)
+				state.panel_stock += 1
+				_refresh_solar()
+				hud.toast("Panel picked up. Press P to place it somewhere else.", 2.5)
 		"cart_grab":
 			cart.set_pushing(true)
 			hud.toast("Pushing the handcart. You can't clean or sprint while pushing; E to let go.", 3.0)
@@ -1308,7 +1563,7 @@ func _base_price(item: String) -> int:
 		"cart":
 			return GameState.CARTS[state.cart_lvl + 1].cost if state.cart_lvl < GameState.CARTS.size() - 1 else -1
 		"panel":
-			return state.panel_cost() if state.panels < GameState.MAX_PANELS else -1
+			return state.panel_cost() if state.panels + state.panel_stock < GameState.MAX_PANELS else -1
 		"sweeper":
 			return GameState.SWEEPER_COST if not state.sweeper_owned else -1
 		"charger":
@@ -1368,8 +1623,8 @@ func buy(item: String) -> bool:
 			else:
 				cart._update_fill()
 		"panel":
-			state.panels += 1
-			_refresh_solar()
+			state.panel_stock += 1
+			hud.toast("Solar panel bought. Press P outside to place it (within %d m of the base)." % int(PANEL_RANGE), 4.0)
 		"sweeper":
 			state.sweeper_owned = true
 			sweeper.energy = sweeper.battery

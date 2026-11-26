@@ -311,8 +311,9 @@ func _update_text() -> void:
 		wear_lbl.text = "Wear: " + " · ".join(parts)
 	# Grid power only matters at the base or while driving.
 	var near_base := Vector2(world.focus_point().x, world.focus_point().z).length() < 40.0
-	grid_lbl.visible = near_base or v != null
-	grid_lbl.text = "Base grid %.0f/%.0f kWh · solar +%.1f kW" % [s.bank, s.bank_cap(), s.gen_kw() * s.daylight()]
+	grid_lbl.visible = near_base or v != null or s.panel_stock > 0
+	grid_lbl.text = "Base grid %.0f/%.0f kWh · solar +%.1f kW%s" % [s.bank, s.bank_cap(), s.gen_kw() * s.daylight(),
+		("  ·  %d panel%s to place [P]" % [s.panel_stock, "" if s.panel_stock == 1 else "s"]) if s.panel_stock > 0 else ""]
 	var m := world.missions.current(s)
 	mission_bar.max_value = 1.0
 	if m.is_empty():
@@ -599,6 +600,9 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 func toggle_pause() -> void:
+	if world.placing:
+		world._end_placing()  # Esc cancels panel placement first
+		return
 	if key_guide.visible:
 		key_guide.visible = false
 		return

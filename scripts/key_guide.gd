@@ -13,18 +13,20 @@ const BINDS := {
 	"Esc": ["both", "Menu", "Menu", "Pause menu / close a window"],
 	"F1": ["both", "Keys", "Keys", "This key guide"],
 	"F3": ["both", "FPS", "FPS", "FPS counter"],
+	"F11": ["both", "Full", "Full", "Fullscreen on / off (also Alt+Enter)"],
 	"W": ["both", "Fwd", "Gas", "Walk forward / accelerate"],
 	"A": ["both", "Left", "Steer", "Walk left / steer left"],
 	"S": ["both", "Back", "Brake", "Walk back / brake, then reverse"],
 	"D": ["both", "Right", "Steer", "Walk right / steer right"],
 	"Shift": ["both", "Sprint", "Boost", "Sprint / boost (faster, uses more battery per km)"],
-	"Space": ["both", "Jump", "Handbrake", "Jump / handbrake (drift)"],
+	"Space": ["both", "Jump", "Handbrake", "Jump; at a ledge, climb up / handbrake (drift)"],
 	"E": ["both", "Use", "Exit", "Interact: terminal, pods, plug, drive / get out"],
 	"F": ["foot", "Clean", "", "Clean the rust you aim at (same as holding LMB)"],
 	"G": ["foot", "Kit", "", "Use a repair kit on the vehicle next to you"],
 	"B": ["foot", "Cell", "", "Install a battery cell in the vehicle next to you"],
 	"Q": ["both", "Unload", "Empty", "Tip tank into handcart, or drop a sack / Empty the hopper (sells it at the depot)"],
-	"R": ["drive", "", "Brush", "Sweeper brush on / off"],
+	"R": ["both", "Rotate", "Brush", "Rotate the panel you are placing / Sweeper brush on / off"],
+	"P": ["foot", "Panel", "", "Place a bought solar panel (R rotates, LMB places)"],
 	"V": ["drive", "", "Cam", "Chase / hood camera"],
 	"T": ["both", "Mark", "Mark", "Set a waypoint where you look (again to remove)"],
 	"M": ["both", "Map", "Map", "Big map"],
@@ -33,7 +35,7 @@ const BINDS := {
 }
 # rows of [label, width in key units]; "" = gap
 const ROWS := [
-	[["Esc", 1.0], ["", 0.5], ["F1", 1.0], ["F2", 1.0], ["F3", 1.0], ["F4", 1.0]],
+	[["Esc", 1.0], ["", 0.5], ["F1", 1.0], ["F2", 1.0], ["F3", 1.0], ["F4", 1.0], ["", 0.5], ["F11", 1.0]],
 	[["`", 1.0], ["1", 1.0], ["2", 1.0], ["3", 1.0], ["4", 1.0], ["5", 1.0], ["6", 1.0], ["7", 1.0], ["8", 1.0], ["9", 1.0], ["0", 1.0]],
 	[["Tab", 1.5], ["Q", 1.0], ["W", 1.0], ["E", 1.0], ["R", 1.0], ["T", 1.0], ["Y", 1.0], ["U", 1.0], ["I", 1.0], ["O", 1.0], ["P", 1.0]],
 	[["Caps", 1.75], ["A", 1.0], ["S", 1.0], ["D", 1.0], ["F", 1.0], ["G", 1.0], ["H", 1.0], ["J", 1.0], ["K", 1.0], ["L", 1.0]],
@@ -101,7 +103,7 @@ func _draw() -> void:
 			continue
 		var parts := str(b[3]).split(" / ")
 		var desc: String = b[3]
-		if b[0] == "both" and parts.size() == 2 and label in ["W", "A", "S", "D", "Shift", "Space", "E", "L", "Q"]:
+		if b[0] == "both" and parts.size() == 2 and label in ["W", "A", "S", "D", "Shift", "Space", "E", "L", "Q", "R"]:
 			desc = parts[1] if driving else parts[0]
 		draw_string(font, Vector2(tx, ty), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, _ctx_color(b[0]))
 		draw_string(font, Vector2(tx + 58, ty), desc, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 70.0, 15, Color(1, 1, 1, 0.9))
