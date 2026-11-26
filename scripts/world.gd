@@ -54,6 +54,11 @@ var _act := ""
 var _act_vehicle: Vehicle
 var _post_index := 0
 var _labels := {}
+var waypoint: Beacon
+var pod: SupplyPod
+var _pod_timer := 120.0
+var _last_rank := 0
+var _near_vehicle: Vehicle
 var _solar_label: Label3D
 
 
@@ -146,6 +151,11 @@ func _start_play() -> void:
 	player.camera.current = true
 	for i in state.drones:
 		spawn_drone(i)
+	if state.sol_start.is_empty():
+		state.start_sol_report()
+	_last_rank = state.rank_index()
+	for v in [sweeper, charger]:
+		apply_livery(v)
 	hud = Hud.new()
 	hud.world = self
 	add_child(hud)
@@ -589,6 +599,7 @@ func player_clean(pos: Vector3, tool: Dictionary, dt: float) -> bool:
 		return false
 	state.tank = minf(state.tank + kg, state.capacity())
 	state.collected += kg
+	state.sol_kg.you += kg
 	_dig(kg)
 	cleaned_kg_total += kg
 	_player_fx_t = 0.12
@@ -604,6 +615,7 @@ func vehicle_clean(_v: Vehicle, pos: Vector3, radius: float, strength: float) ->
 	if kg > 0.0:
 		state.hopper = minf(state.hopper + kg, GameState.SWEEPER_HOPPER)
 		state.collected += kg
+		state.sol_kg.sweeper += kg
 		_dig(kg)
 		cleaned_kg_total += kg
 		_sweeper_fx_t = 0.12
@@ -618,6 +630,7 @@ func drone_clean(pos: Vector3, radius: float, strength: float) -> bool:
 		state.earned += c
 		state.total_sold += kg
 		state.collected += kg
+		state.sol_kg.drones += kg
 		cleaned_kg_total += kg
 		return true
 	return false
@@ -783,6 +796,11 @@ func _process(dt: float) -> void:
 		_poll_hexes()
 		if mode == "play":
 			_check_wear()
+			var r := state.rank_index()
+			if r > _last_rank:
+				_last_rank = r
+				hud.toast("RANK UP: %s  ·  exports now pay +%d%%" % [state.rank_name(), roundi(r * GameState.RANK_BONUS * 100.0)], 6.0, Color(1.0, 0.85, 0.35))
+				sfx("forceField_001")
 			for m in missions.check(state):
 				hud.mission_complete(m)
 				sfx("laserSmall_000")
@@ -797,6 +815,7 @@ func _process(dt: float) -> void:
 		_clean_loop.play()
 	elif _clean_loop.volume_db <= -49.5 and _clean_loop.playing:
 		_clean_loop.stop()
+	_update_pods(dt)
 	_update_interaction()
 	_autosave_t += dt
 	if _autosave_t > 60.0:
@@ -813,8 +832,9 @@ func _update_daycycle(dt: float) -> void:
 	state.time_of_day += dt / GameState.SOL_SECONDS
 	if state.time_of_day >= 1.0:
 		state.time_of_day -= 1.0
+		hud.sol_report(_sol_summary())
 		state.sol += 1
-		hud.toast("Sol %d begins." % state.sol, 3.0)
+		state.start_sol_report()
 	var t := state.time_of_day
 	var elev := sin((t - 0.25) * TAU)  # -1 midnight .. 1 noon
 	var day := smoothstep(-0.08, 0.3, elev)
@@ -924,8 +944,12 @@ func _update_interaction() -> void:
 		elif _flat_dist(p, TERMINAL) < 4.0:
 			prompt = "[E] Open base terminal  (upgrades · solar · vehicles)"
 			_act = "shop"
+		elif pod and pod.landed and not pod.opened and _flat_dist(p, pod.global_position) < 3.8:
+			prompt = "[E] Open the supply pod"
+			_act = "open_pod"
 		else:
 			prompt = _charging_prompt(p)
+			_near_vehicle = null
 			if _act == "":
 				for veh in [sweeper, charger]:
 					if owns(veh) and _flat_dist(p, veh.global_position) < 4.5:
@@ -936,6 +960,11 @@ func _update_interaction() -> void:
 							prompt = "[E] Drive %s  (battery %d%%)" % [veh.display_name(), pct]
 							_act = "enter"
 							_act_vehicle = veh
+						_near_vehicle = veh
+						if state.repair_kits > 0:
+							prompt += "  ·  [G] repair kit ×%d" % state.repair_kits
+						if state.battery_cells > 0:
+							prompt += "  ·  [B] battery cell ×%d" % state.battery_cells
 						break
 	else:
 		# Controls are in the hint bar; the prompt only shows what this spot offers.
@@ -987,6 +1016,21 @@ func _unhandled_input(e: InputEvent) -> void:
 		sfx("forceField_001")
 	elif e.is_action_pressed("vehicle_empty") and driven() == sweeper:
 		empty_hopper()
+	elif e.is_action_pressed("waypoint"):
+		_place_waypoint()
+	elif e.is_action_pressed("use_kit") and _near_vehicle and player.active and state.repair_kits > 0:
+		var worst: Array = _near_vehicle.worst_part()
+		_near_vehicle.cond[worst[0]] = minf(float(worst[1]) + 0.5, 1.0)
+		state.repair_kits -= 1
+		_near_vehicle.flat_warned = false
+		_near_vehicle._update_wear_visuals()
+		hud.toast("Repair kit used on the %s %s." % [_near_vehicle.display_name(), str(GameState.PART_NAMES[worst[0]]).to_lower()], 3.0)
+		sfx("forceField_001")
+	elif e.is_action_pressed("use_cell") and _near_vehicle and player.active and state.battery_cells > 0:
+		_near_vehicle.energy = minf(_near_vehicle.energy + 10.0, _near_vehicle.battery)
+		state.battery_cells -= 1
+		hud.toast("Battery cell installed: +10 kWh for the %s." % _near_vehicle.display_name(), 3.0)
+		sfx("forceField_001")
 	elif e is InputEventMouseButton and e.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -1001,6 +1045,8 @@ func _do_action() -> void:
 		"shop":
 			hud.open_shop()
 			sfx("computerNoise_002")
+		"open_pod":
+			_open_pod()
 		"plug":
 			plugged[_act_vehicle] = _post_index
 			hud.toast("%s plugged in. It charges from the base battery." % _act_vehicle.display_name(), 2.5)
@@ -1068,6 +1114,17 @@ func price(item: String) -> int:
 			if not owns(veh) or float(state.wear[parts[1]][parts[2]]) >= 0.995 or bay_of(veh) < 0:
 				return -1
 			return state.repair_cost(parts[1], parts[2])
+		_ when item.begins_with("paint_"):
+			var parts := item.split("_")
+			var veh := sweeper if parts[1] == "sweeper" else charger
+			if not owns(veh) or state.livery[parts[1]] == parts[2]:
+				return -1
+			if (state.liveries[parts[1]] as Array).has(parts[2]):
+				return 0
+			for lv in GameState.LIVERIES:
+				if lv.id == parts[2]:
+					return lv.cost
+			return -1
 		"tow_sweeper":
 			return GameState.TOW_COST if state.sweeper_owned and bay_of(sweeper) < 0 else -1
 		"tow_charger":
@@ -1119,6 +1176,12 @@ func buy(item: String) -> bool:
 			var veh := sweeper if parts[1] == "sweeper" else charger
 			veh.flat_warned = false
 			veh._update_wear_visuals()
+		_ when item.begins_with("paint_"):
+			var parts := item.split("_")
+			if not (state.liveries[parts[1]] as Array).has(parts[2]):
+				(state.liveries[parts[1]] as Array).append(parts[2])
+			state.livery[parts[1]] = parts[2]
+			apply_livery(sweeper if parts[1] == "sweeper" else charger)
 		"tow_sweeper", "tow_charger":
 			var v := sweeper if item == "tow_sweeper" else charger
 			if v.driving:
@@ -1132,6 +1195,105 @@ func buy(item: String) -> bool:
 			v.speed = 0.0
 	sfx("forceField_001")
 	return true
+
+
+func apply_livery(v: Vehicle) -> void:
+	for lv in GameState.LIVERIES:
+		if lv.id == state.livery[v.kind]:
+			v.apply_livery(lv)
+
+
+# ---------------------------------------------------------------- waypoints and supply pods
+
+## T: drop a waypoint where you are looking (T on the waypoint again removes it).
+func _place_waypoint() -> void:
+	var cam := get_viewport().get_camera_3d()
+	var from := cam.global_position
+	var q := PhysicsRayQueryParameters3D.create(from, from - cam.global_basis.z * 800.0, 1 | 4)
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var pos: Vector3
+	if hit:
+		pos = hit.position
+	else:
+		var far := from - cam.global_basis.z * 300.0
+		pos = Vector3(far.x, terrain.height_at(far.x, far.z), far.z)
+	if waypoint and _flat_dist(waypoint.global_position, pos) < 10.0:
+		waypoint.queue_free()
+		waypoint = null
+		hud.toast("Waypoint removed.", 1.5)
+		return
+	if waypoint == null:
+		waypoint = Beacon.new()
+		waypoint.title = "Waypoint"
+		add_child(waypoint)
+	waypoint.global_position = pos
+	hud.toast("Waypoint set, %d m %s." % [roundi(_flat_dist(from, pos)), compass_word(pos - from)], 2.0)
+	sfx("computerNoise_002")
+
+
+static func compass_word(d: Vector3) -> String:
+	var deg := fposmod(rad_to_deg(atan2(d.x, -d.z)), 360.0)
+	return ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"][int(round(deg / 45.0)) % 8]
+
+
+func _update_pods(dt: float) -> void:
+	if pod and is_instance_valid(pod):
+		if pod.landed and pod.age > GameState.SOL_SECONDS:
+			hud.toast("An unopened supply pod was recovered by the company.", 3.0)
+			pod.queue_free()
+			pod = null
+		return
+	pod = null
+	_pod_timer -= dt
+	if _pod_timer > 0.0:
+		return
+	_pod_timer = randf_range(240.0, 420.0)
+	var a := randf() * TAU
+	var d := randf_range(70.0, 220.0)
+	var x := cos(a) * d
+	var z := sin(a) * d
+	pod = SupplyPod.new()
+	pod.world = self
+	pod.target = Vector3(x, terrain.height_at(x, z), z)
+	add_child(pod)
+	hud.toast("Supply pod inbound: %d m %s of the base. Follow the orange beacon." % [roundi(d), compass_word(Vector3(x, 0, z))], 6.0, Color(1.0, 0.75, 0.4))
+	sfx("laserSmall_000")
+
+
+func _open_pod() -> void:
+	var cash := randi_range(3000, 12000) * (1.0 + 0.15 * state.rank_index())
+	state.credits += cash
+	state.earned += cash
+	var got := PackedStringArray([GameState.inr(cash)])
+	if randf() < 0.6:
+		state.repair_kits += 1
+		got.append("a repair kit (G)")
+	if randf() < 0.45:
+		state.battery_cells += 1
+		got.append("a battery cell (B)")
+	state.pods_opened += 1
+	hud.toast("Supply pod: " + ", ".join(got), 5.0, Color(1.0, 0.8, 0.45))
+	if randf() < 0.15:
+		state.dig_meter = state.next_relic_kg
+		_dig(0.001)
+	sfx("doorOpen_001")
+	pod.open()
+	pod = null
+
+
+func _sol_summary() -> Dictionary:
+	var s0 := state.sol_start
+	var by: Dictionary = state.sol_kg
+	var total := float(by.you) + float(by.sweeper) + float(by.drones)
+	var mvp := "you"
+	for k in by:
+		if float(by[k]) > float(by[mvp]):
+			mvp = k
+	return {
+		sol = state.sol, kg = total, earned = state.earned - float(s0.get("earned", state.earned)),
+		hexes = state.hexes_cleared.size() - int(s0.get("hexes", 0)), relics = state.relics_found.size() - int(s0.get("relics", 0)),
+		pods = state.pods_opened - int(s0.get("pods", 0)), mvp = mvp, mvp_share = (float(by[mvp]) / total) if total > 0.0 else 0.0,
+	}
 
 
 func save_game() -> void:
