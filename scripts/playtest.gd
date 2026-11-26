@@ -17,6 +17,8 @@ func run() -> void:
 	await _kit_flow()
 	await _paint_flow()
 	await _key_guide_flow()
+	await _progression_flow()
+	await _cart_flow()
 	await _torch_flow()
 	await _save_flow()
 	await _worlds_flow()
@@ -174,6 +176,7 @@ func _paint_flow() -> void:
 	s.credits = 50000.0
 	await _stand_near(World.TERMINAL, Vector3(2.0, 0, 0), World.TERMINAL)
 	check(world._act == "shop", "terminal offers the shop")
+	world.hud.shop_tab = "Paint"
 	await _press("interact")
 	check(world.hud.shop_layer.visible and world.ui_open, "terminal opens")
 	var b := _find_button("Sweeper: Saffron Strike")
@@ -231,7 +234,8 @@ func _worlds_flow() -> void:
 	check(GameState.save_dir == Worlds.dir_of(a), "the running world saves into its own folder")
 	check(Worlds.parse_seed("12345") == 12345, "a number seed is used as-is")
 	check(Worlds.parse_seed("mars") == Worlds.parse_seed("mars") and Worlds.parse_seed("mars") != Worlds.parse_seed("moon"), "word seeds are stable and distinct")
-	var b := Worlds.create("Second colony", "777")
+	var b := Worlds.create("Second colony", "777", "hard")
+	check(Worlds.read_meta(b).difficulty == "hard", "a world remembers its difficulty")
 	var c := Worlds.create("", "")
 	check(Worlds.read_meta(c).name == "Colony 1", "blank name gets a default (%s)" % Worlds.read_meta(c).name)
 	check(Worlds.list().size() == 3, "three worlds listed")
@@ -322,6 +326,159 @@ func _menu_flow() -> void:
 	check(played.size() == 2 and played[-1][1] == true and made.name == "Hellas Camp" and made.seed == Worlds.parse_seed("dusty"),
 		"Create & play makes the world with that name and seed and starts it as new")
 	layer.queue_free()
+
+
+func _open_tab(tab: String) -> void:
+	world.hud.shop_tab = tab
+	if not world.hud.shop_layer.visible:
+		world.hud.open_shop()
+	else:
+		world.hud._refresh_shop()
+	await _frames(2)
+
+
+func _row_lock(title_part: String) -> String:
+	for row in world.hud.shop_list.get_children():
+		if row is HBoxContainer:
+			var vb: VBoxContainer = row.get_child(0)
+			if (vb.get_child(0) as Label).text.contains(title_part):
+				for c in vb.get_children():
+					if c is Label and (c as Label).text.begins_with("Locked: "):
+						return (c as Label).text
+				return ""
+	return "missing"
+
+
+func _progression_flow() -> void:
+	print("[progression]")
+	var s := world.state
+	s.credits = 500000.0
+	s.earned = 0.0
+	s.tool_lvl = 0
+	s.mods = {power = 0, width = 0, reach = 0}
+	s.mastery_kg = {}
+	s.hexes_cleared = []
+	s.sweeper_owned = false
+	world._set_vehicle_present(world.sweeper, false)
+	# Tabs.
+	await _open_tab("Tools")
+	check(world.hud._tab_bar.get_child_count() == 7, "terminal has 7 category tabs")
+	check(_row_lock("Wider head").contains("mastery"), "width is locked until the tool earns a mastery star (%s)" % _row_lock("Wider head"))
+	await _shot("9a_tools_tab_locked")
+	var kg_needed := s.mastery_next_kg()
+	check(kg_needed > 50.0, "first mastery star needs real cleaning (%.0f kg)" % kg_needed)
+	s.mastery_kg["0"] = kg_needed + 1.0
+	check(s.mastery_level() == 1, "cleaning that much earns ★1")
+	await _open_tab("Tools")
+	check(_row_lock("Wider head") == "", "★1 unlocks width level 1")
+	var b := _find_button("Wider head")
+	b.pressed.emit()
+	await _frames(2)
+	check(s.mods.width == 1 and _row_lock("Wider head").contains("★★"), "width level 2 needs ★2 (%s)" % _row_lock("Wider head"))
+	check(is_equal_approx(s.tool().radius, 0.45 * 1.06), "width level adds only 6%% radius (%.3f m)" % s.tool().radius)
+	check(world.price("tool") > 0, "Push Broom has no rank lock")
+	s.tool_lvl = 1
+	check(world.lock_reason("tool").contains("Dust Walker"), "Air Blower needs rank Dust Walker (%s)" % world.lock_reason("tool"))
+	# Machines.
+	await _open_tab("Vehicles")
+	var lock := _row_lock("Sweeper")
+	check(lock.contains("Grit Grinder") and lock.contains("25 more hexagons"), "Sweeper locked behind rank and 25 hexagons (%s)" % lock)
+	check(_row_lock("Charger cart").contains("own the Sweeper"), "Charger cart needs the Sweeper first")
+	await _shot("9b_vehicles_locked")
+	s.earned = 70000.0
+	for i in 24:
+		s.hexes_cleared.append("t:%d" % i)
+	check(world.lock_reason("sweeper") == "1 more hexagon cleared", "24 hexagons is not enough (%s)" % world.lock_reason("sweeper"))
+	s.hexes_cleared.append("t:24")
+	check(world.lock_reason("sweeper") == "" and world.price("sweeper") == 90000, "rank + 25 hexagons unlocks the Sweeper at ₹90,000")
+	await _open_tab("Drones")
+	check(_row_lock("Cleaning drone").contains("Hex Hunter"), "drones need rank Hex Hunter")
+	world.hud.close_shop()
+	# Crust.
+	check(s.crust_at(0, 0) == 0 and s.crust_at(200, 0) == 1 and s.crust_at(0, 450) == 2 and s.crust_at(700, 0) == 3, "crust rings at 140 / 320 / 600 m")
+	check(is_equal_approx(GameState.crust_factor(0, 1), 0.25) and GameState.crust_factor(1, 1) == 1.0, "under-tier tool cleans at 25% per missing tier")
+	await _stand_near(Vector3(0, 0, 200), Vector3.ZERO, Vector3(0, 0, 190))
+	p_shot_pitch()
+	await _frames(20)
+	await _shot("9c_crust_ii")
+	# Hex bonus.
+	var k := RustField.hex_key(0.0, 230.0)
+	var c := RustField.key_center(k)
+	var expect := world.hex_bonus(k)
+	check(expect > 2000, "a Crust II hexagon pays more than the old flat ₹2,000 (%s)" % GameState.inr(expect))
+	var cr0 := s.credits
+	for y in range(-11, 12, 2):
+		for x in range(-11, 12, 2):
+			world.rust.paint(Vector3(c.x + x, 0, c.y + y), 1.6, 1.0)
+	world._poll_hexes()
+	check(is_equal_approx(s.credits - cr0, float(expect)), "clearing it pays exactly that bonus (+%s)" % GameState.inr(s.credits - cr0))
+	# Difficulty.
+	s.difficulty = "hard"
+	var hard_price := world.price("panel")
+	s.difficulty = "standard"
+	check(hard_price > world.price("panel"), "Hard makes things dearer (panel %s vs %s)" % [GameState.inr(hard_price), GameState.inr(world.price("panel"))])
+	s.difficulty = "hard"
+	check(s.crust_at(0, 110) == 1, "Hard brings the crust closer to base")
+	s.difficulty = "standard"
+
+
+func p_shot_pitch() -> void:
+	world.player.pitch = -0.35
+
+
+func _cart_flow() -> void:
+	print("[handcart and sacks]")
+	var s := world.state
+	s.credits = 50000.0
+	s.tank = 0.0
+	await _open_tab("Gear")
+	var b := _find_button("Handcart")
+	check(b != null and b.text.contains("6,000"), "handcart costs ₹6,000 in the Gear tab (%s)" % (b.text if b else "missing"))
+	b.pressed.emit()
+	await _frames(3)
+	world.hud.close_shop()
+	check(world.cart != null and s.cart_lvl == 0, "buying it puts a handcart by the depot")
+	await _stand_near(world.cart.global_position, Vector3(0, 0, 2.0), world.cart.global_position)
+	check(world._act == "cart_grab", "next to the cart: [E] push it")
+	await _press("interact")
+	check(world.cart.pushing, "E grabs the cart")
+	var start := world.cart.global_position
+	world.player.yaw = PI  # walk south, away from the base
+	Input.action_press("move_forward")
+	await get_tree().create_timer(2.0).timeout
+	Input.action_release("move_forward")
+	await _frames(5)
+	var moved := world.cart.global_position.distance_to(start)
+	check(moved > 4.0, "the cart rolls ahead of you (%.1f m)" % moved)
+	check(world.player.velocity.length() < 3.2, "pushing is slower than walking")
+	await _shot("10a_pushing_cart")
+	await _press("interact")
+	check(not world.cart.pushing, "E lets go")
+	s.tank = 20.0
+	await _press("vehicle_empty")
+	check(is_equal_approx(world.cart.load_kg, 20.0) and s.tank == 0.0, "Q next to the cart tips the tank in")
+	world.cart.place(World.DEPOT + Vector3(-4, 0, 4), 0.0)
+	s.tank = 5.0
+	await _stand_near(World.DEPOT, Vector3(-2, 0, 2), World.DEPOT)
+	check(world._act == "export" and world.hud.prompt_lbl.text.contains("25.0 kg"), "depot exports tank + cart (%s)" % world.hud.prompt_lbl.text)
+	var cr0 := s.credits
+	await _press("interact")
+	check(world.cart.load_kg == 0.0 and s.tank == 0.0 and s.credits > cr0, "both are sold at full price")
+	# Sacks.
+	await _stand_near(Vector3(40, 0, -40), Vector3.ZERO, Vector3(40, 0, -50))
+	s.tank = 24.0
+	await _press("vehicle_empty")
+	check(s.sacks.size() == 1 and s.tank == 0.0, "Q away from the cart drops a sack")
+	await _shot("10b_sack")
+	cr0 = s.credits
+	var gross := 24.0 * s.price_now()
+	world._haul_t = 0.01
+	await _frames(3)
+	check(s.sacks.is_empty() and absf((s.credits - cr0) - gross * 0.75) < 2.0, "the hauler pays 75%% on Standard (+%s)" % GameState.inr(s.credits - cr0))
+	world.save_game()
+	var loaded := GameState.new()
+	loaded.load_into(RustField.new())
+	check(loaded.cart_lvl == 0, "the handcart is saved")
 
 
 func _torch_flow() -> void:
