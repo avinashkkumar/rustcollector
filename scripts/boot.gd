@@ -9,6 +9,7 @@ extends Node
 ##   --bench-upscaler=off|fsr1|fsr2  choose the upscaler (default: preset/auto)
 ##   --bench-out=/path/to/dir     where results go (default: build/benchmark_results)
 ##   --bench-autoquit             exit when finished (for scripted runs)
+##   --playtest=DIR               developer: automated playtest of pods, kits and the paint shop
 
 var current: Node
 var _story_shown := false
@@ -16,7 +17,15 @@ var _story_shown := false
 
 func _ready() -> void:
 	var args := parse_args()
-	if args.has("debug-shot"):
+	if args.has("playtest"):
+		_story_shown = true
+		start_game(false)
+		var pt := Playtest.new()
+		pt.world = current
+		pt.out_dir = str(args["playtest"])
+		add_child(pt)
+		pt.run()
+	elif args.has("debug-shot"):
 		_debug_shot(str(args["debug-shot"]), float(args.get("debug-shot-delay", 4.0)), str(args.get("debug-shot-scene", "play")))
 	elif args.has("run-benchmark"):
 		start_benchmark(str(args.get("bench-preset", "high")), args)
