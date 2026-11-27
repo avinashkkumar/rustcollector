@@ -57,6 +57,7 @@ var cam_mode := 0  # 0 = chase, 1 = hood
 var model: Node3D
 var body_pivot: Node3D
 var roller: Node3D
+var _guard: Node3D
 var wheels: Array[Node3D] = []
 var headlights: Array[SpotLight3D] = []
 var _cam_pos := Vector3.ZERO
@@ -143,6 +144,7 @@ func display_name() -> String:
 
 func set_driving(on: bool) -> void:
 	driving = on
+	parked = false
 	if on:
 		camera.current = true
 		snap_camera()
@@ -151,15 +153,51 @@ func set_driving(on: bool) -> void:
 		engine_sfx.stop()
 
 
+func _has_ground_below() -> bool:
+	var q := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 1.0, global_position + Vector3.DOWN * 3.0, 1 | 4)
+	q.exclude = [get_rid()]
+	return not get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+
+
 func snap_camera() -> void:
 	_cam_pos = global_position + Basis(Vector3.UP, heading) * Vector3(0, 4.0, 9.0)
 
 
 # ---------------------------------------------------------------- driving physics
 
+## A vehicle nobody drives is parked: it stops simulating, so it stays put even after you walk
+## far enough away that the terrain under it no longer has collision (it used to fall through).
+var parked := false
+var _park_pos := Vector3.ZERO
+const RIDE := 0.25  # the body's collision box sits this far above the vehicle's origin
+
+
 func _physics_process(dt: float) -> void:
 	if autopilot:
 		return
+	if not driving:
+		var ground := world.terrain.height_at(global_position.x, global_position.z) - RIDE
+		if global_position.y < ground - 1.0:
+			# Fell through the ground in an older save, or got pushed under it: put it back on top.
+			global_position.y = ground + 0.3
+			velocity = Vector3.ZERO
+			parked = false
+		speed = move_toward(speed, 0.0, brake * dt)  # nobody aboard: the parking brake holds it
+		lateral = move_toward(lateral, 0.0, brake * dt)
+		if parked and global_position.distance_squared_to(_park_pos) > 0.0001:
+			parked = false  # moved by a tow, a save load or a test: settle again
+		if parked:
+			return
+		if absf(speed) < 0.05 and (is_on_floor() or not _has_ground_below()):
+			# Settled (or no collision here any more): rest on the terrain and stop simulating.
+			if not is_on_floor():
+				global_position.y = ground
+			speed = 0.0
+			lateral = 0.0
+			velocity = Vector3.ZERO
+			parked = true
+			_park_pos = global_position
+			return
 	var throttle := 0.0
 	var steer_in := 0.0
 	var handbrake := false
@@ -323,7 +361,7 @@ func _process(dt: float) -> void:
 		var front := p + f * 2.5
 		# A worn brush leaves more behind and covers less width.
 		world.vehicle_clean(self, Vector3(front.x, world.terrain.height_at(front.x, front.z), front.z),
-			2.3 * (0.7 + 0.3 * brush), 4.0 * (0.3 + 0.7 * brush) * dt)
+			head_width * 0.5 * (0.7 + 0.3 * brush), 4.0 * (0.3 + 0.7 * brush) * dt)
 	_vis_t -= dt
 	if _vis_t <= 0.0:
 		_vis_t = 0.5
@@ -425,14 +463,26 @@ func drive_power(throttle: float) -> float:
 ## The roller works on the ground it covers, so its draw follows speed (a little to spin it
 ## while standing still).
 func brush_power() -> float:
-	return maxf(sweep_kw * absf(speed) / max_speed, 0.1)
+	return maxf(sweep_kw * head_width / 4.6 * absf(speed) / max_speed, 0.1)
+
+
+var head_width := 4.6  # m of ground the roller sweeps (the wider-head upgrade raises it)
+
+
+## Fits a brush head `w` metres wide: the roller (and its guard) stretch to match.
+func set_head_width(w: float) -> void:
+	head_width = w
+	if roller:
+		roller.scale = Vector3(1.0, w / 4.6, 1.0)  # the roller's axis is its local Y
+	if _guard:
+		_guard.scale.x = w / 4.6
 
 
 ## Estimated km left driving steadily at `kmh`.
 func range_at(kmh_now: float) -> float:
 	var v := kmh_now / 3.6
 	var frac := v / max_speed
-	var kw := (drive_kw * frac * frac * (1.0 + 0.5 * (1.0 - float(cond.motor))) + (maxf(sweep_kw * frac, 0.1) if tool_on else 0.0) + IDLE_KW) * float(world.state.diff().drain)
+	var kw := (drive_kw * frac * frac * (1.0 + 0.5 * (1.0 - float(cond.motor))) + (maxf(sweep_kw * head_width / 4.6 * frac, 0.1) if tool_on else 0.0) + IDLE_KW) * float(world.state.diff().drain)
 	return energy / kw * GameState.TIME_SCALE * v / 1000.0
 
 
@@ -472,7 +522,7 @@ func _build_sweeper() -> void:
 	_rbox(Vector3(1.7, 0.95, 1.5), Vector3(0, 1.68, -0.4), white, 0.14)
 	_rbox(Vector3(1.5, 0.5, 0.06), Vector3(0, 1.88, -1.17), glass, 0.02)
 	_rbox(Vector3(1.9, 0.8, 1.4), Vector3(0, 1.6, 1.25), white, 0.12)
-	_rbox(Vector3(2.5, 0.15, 0.5), Vector3(0, 0.62, -2.05), dark, 0.05)
+	_guard = _rbox(Vector3(2.5, 0.15, 0.5), Vector3(0, 0.62, -2.05), dark, 0.05)
 	_wheels([-1.25, 0.0, 1.25], 1.22, 0.45, Vector3(0.95, 1.0, 0.45))
 	roller = Node3D.new()
 	roller.position = Vector3(0, 0.36, -2.3)
@@ -647,7 +697,7 @@ func _lights(xs: Array, base: Vector3) -> void:
 		headlights.append(s)
 
 
-func _rbox(size: Vector3, pos: Vector3, m: Material, _bevel: float) -> void:
+func _rbox(size: Vector3, pos: Vector3, m: Material, _bevel: float) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var b := BoxMesh.new()
 	b.size = size
@@ -655,6 +705,7 @@ func _rbox(size: Vector3, pos: Vector3, m: Material, _bevel: float) -> void:
 	mi.material_override = m
 	mi.position = pos
 	body_pivot.add_child(mi)
+	return mi
 
 
 static func _cyl(r: float, h: float, seg: int) -> CylinderMesh:
