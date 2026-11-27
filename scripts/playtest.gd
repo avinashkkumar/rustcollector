@@ -9,26 +9,18 @@ var passed := 0
 var failed := 0
 
 
+const FLOWS := ["pod", "kit", "paint", "key_guide", "progression", "cart", "torch", "infra", "panel", "speed", "depot_drive", "sack", "sleep", "left_behind", "vehicle_upgrade", "save", "worlds", "menu"]
+
+
 func run() -> void:
 	seed(1234)
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	await _frames(30)
-	await _pod_flow()
-	await _kit_flow()
-	await _paint_flow()
-	await _key_guide_flow()
-	await _progression_flow()
-	await _cart_flow()
-	await _torch_flow()
-	await _infra_flow()
-	await _panel_flow()
-	await _speed_flow()
-	await _depot_drive_flow()
-	await _sack_flow()
-	await _sleep_flow()
-	await _save_flow()
-	await _worlds_flow()
-	await _menu_flow()
+	# RF_ONLY=left_behind,vehicle_upgrade runs just those flows (names without _ and _flow).
+	var only := OS.get_environment("RF_ONLY").split(",", false)
+	for f in FLOWS:
+		if only.is_empty() or only.has(f):
+			await call("_%s_flow" % f)
 	print("PLAYTEST RESULT: %d passed, %d failed" % [passed, failed])
 	get_tree().quit(1 if failed > 0 else 0)
 
@@ -986,3 +978,129 @@ func _sleep_flow() -> void:
 	await _frames(10)
 	await _shot("good_morning")
 	world.plugged.erase(v)
+
+
+## A Sweeper left far from the player must still be there, on the ground and driveable, later.
+func _left_behind_flow() -> void:
+	print("[vehicle left behind]")
+	var s := world.state
+	var v := world.sweeper
+	s.sweeper_owned = true
+	world._set_vehicle_present(v, true)
+	v.energy = v.battery
+	for k in v.cond:
+		v.cond[k] = 1.0
+	var far := Vector3(280, 0, 190)
+	await _stand_near(far, Vector3(6, 0, 0), far)
+	await get_tree().create_timer(1.5).timeout  # terrain and collision stream in around you
+	_put_vehicle(v, far, far + Vector3(0, 0, -50))
+	await _enter(v)
+	await _top_kmh(v, 2.0)
+	await _press("interact")  # get out and leave it
+	await get_tree().create_timer(1.5).timeout
+	var left := v.global_position
+	check(v.parked, "an empty vehicle parks once it stops")
+	# Walk back to base: the far chunks lose their collision and unload.
+	await _stand_near(Vector3(0, 0, 20), Vector3.ZERO, Vector3(0, 0, 0))
+	await get_tree().create_timer(4.0).timeout
+	var ground := world.terrain.height_at(left.x, left.z) - Vehicle.RIDE
+	check(v.global_position.distance_to(left) < 0.2, "the Sweeper stays where you left it (moved %.2f m)" % v.global_position.distance_to(left))
+	check(absf(v.global_position.y - ground) < 0.4, "and it is on the ground, not under it (%.2f vs %.2f)" % [v.global_position.y, ground])
+	# Come back for it and drive off.
+	await _stand_near(left, Vector3(4, 0, 0), left)
+	await get_tree().create_timer(2.0).timeout
+	await _enter(v)
+	check(world.driven() == v, "you can get back in")
+	var p0 := v.global_position
+	await _top_kmh(v, 3.0)
+	check(Vector2(v.global_position.x - p0.x, v.global_position.z - p0.z).length() > 4.0, "and drive it away (%.1f m)" % Vector2(v.global_position.x - p0.x, v.global_position.z - p0.z).length())
+	await _press("interact")
+	await get_tree().create_timer(1.0).timeout
+	# A vehicle that ended up under the ground (old saves) is put back on top.
+	v.global_position.y -= 6.0
+	await _frames(5)
+	var g2 := world.terrain.height_at(v.global_position.x, v.global_position.z) - Vehicle.RIDE
+	check(v.global_position.y > g2 - 0.5, "a buried vehicle is lifted back onto the ground (%.2f vs %.2f)" % [v.global_position.y, g2])
+	await get_tree().create_timer(1.0).timeout
+	await _enter(v)
+	var p1 := v.global_position
+	await _top_kmh(v, 3.0)
+	check(Vector2(v.global_position.x - p1.x, v.global_position.z - p1.z).length() > 4.0, "and it drives again")
+	await _press("interact")
+	await _frames(10)
+
+
+func _vehicle_upgrade_flow() -> void:
+	print("[sweeper head and hopper upgrades]")
+	var s := world.state
+	var v := world.sweeper
+	s.sweeper_owned = true
+	world._set_vehicle_present(v, true)
+	v.energy = v.battery
+	for k in v.cond:
+		v.cond[k] = 1.0
+	s.credits = 500000.0
+	s.sweeper_head_lvl = 0
+	s.hopper_lvl = 0
+	v.set_head_width(s.sweeper_width())
+	await _stand_near(World.TERMINAL, Vector3(0, 0, 2.5), World.TERMINAL)
+	await _open_tab("Vehicles")
+	var head := _find_button("Wider brush head")
+	var hop := _find_button("Bigger hopper")
+	check(head != null and head.text.contains("30,000"), "Vehicles tab sells a wider brush head (%s)" % (head.text if head else "missing"))
+	check(hop != null and hop.text.contains("20,000"), "and a bigger hopper (%s)" % (hop.text if hop else "missing"))
+	if head:
+		head.pressed.emit()
+	await _frames(3)
+	check(is_equal_approx(s.sweeper_width(), 5.6) and is_equal_approx(v.head_width, 5.6), "head fitted: %.1f m swath" % v.head_width)
+	check(is_equal_approx(v.roller.scale.y, 5.6 / 4.6), "the roller is visibly longer (x%.2f)" % v.roller.scale.y)
+	hop = _find_button("Bigger hopper")
+	if hop:
+		hop.pressed.emit()
+	await _frames(3)
+	check(is_equal_approx(s.hopper_capacity(), 1400.0), "hopper holds %.0f kg" % s.hopper_capacity())
+	for i in 3:
+		var b := _find_button("Bigger hopper")
+		if b:
+			b.pressed.emit()
+		await _frames(2)
+	check(is_equal_approx(s.hopper_capacity(), 3000.0) and _find_button("Bigger hopper") == null, "hopper tops out at 3000 kg")
+	world.hud.close_shop()
+	# Wider head cleans more per metre driven.
+	s.hopper = 0.0
+	var spot := Vector3(-150, 0, 160)
+	await _stand_near(spot, Vector3(6, 0, 0), spot)
+	await get_tree().create_timer(1.0).timeout
+	var got := {}
+	for lvl in [0, 3]:
+		s.sweeper_head_lvl = lvl
+		v.set_head_width(s.sweeper_width())
+		var start := spot + Vector3(lvl * 12.0, 0, 0)
+		_even_rust(start, 40.0)  # same rust everywhere, so only the head width differs
+		_put_vehicle(v, start, start + Vector3(0, 0, -100))
+		await _enter(v)
+		v.tool_on = true
+		s.hopper = 0.0
+		await _top_kmh(v, 4.0)
+		got[lvl] = s.hopper
+		await _press("interact")
+		await _frames(5)
+	check(got[3] > got[0] * 1.4, "the 8.2 m head sweeps more than the 4.6 m one (%.0f vs %.0f kg)" % [got[3], got[0]])
+	await _shot("wide_head")
+	s.sweeper_head_lvl = 0
+	s.hopper_lvl = 0
+	v.set_head_width(s.sweeper_width())
+
+
+## Covers the square around `c` (half-size `half` m) with an even layer of rust.
+func _even_rust(c: Vector3, half: float) -> void:
+	var rf := world.rust
+	var k0 := Vector2i(floori((c.x - half) * RustField.PPM / RustField.RES), floori((c.z - half) * RustField.PPM / RustField.RES))
+	var k1 := Vector2i(floori((c.x + half) * RustField.PPM / RustField.RES), floori((c.z + half) * RustField.PPM / RustField.RES))
+	for ky in range(k0.y, k1.y + 1):
+		for kx in range(k0.x, k1.x + 1):
+			var ch: Dictionary = rf.chunk(Vector2i(kx, ky))
+			var d: PackedByteArray = ch.data
+			d.fill(140)
+			ch.data = d
+			rf._dirty[Vector2i(kx, ky)] = true
