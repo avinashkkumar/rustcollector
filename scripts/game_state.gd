@@ -60,7 +60,8 @@ const UNLOCKS := {
 	tool_2 = {rank = 1, hexes = 0}, tool_3 = {rank = 2, hexes = 0}, tool_4 = {rank = 4, hexes = 0},
 	tank_3 = {rank = 1, hexes = 0}, tank_4 = {rank = 3, hexes = 0},
 }
-const SWEEPER_HOPPER := 900.0  # kg
+const SWEEPER_HOPPERS := [{kg = 900.0, cost = 0}, {kg = 1400.0, cost = 20000}, {kg = 2000.0, cost = 50000}, {kg = 3000.0, cost = 110000}]
+const SWEEPER_HEADS := [{width = 4.6, cost = 0}, {width = 5.6, cost = 30000}, {width = 6.8, cost = 70000}, {width = 8.2, cost = 150000}]  # roller swath, m
 const SWEEPER_BATT := [{kwh = 12.0, cost = 0}, {kwh = 18.0, cost = 15000}, {kwh = 26.0, cost = 35000}, {kwh = 36.0, cost = 70000}]
 const CHARGER_BATT := 45.0
 # Full-repair price per part (scaled by how worn it is).
@@ -134,6 +135,8 @@ var bank := 10.0  # the base battery starts half charged
 var sweeper_owned := false
 var charger_owned := false
 var sweeper_batt_lvl := 0
+var hopper_lvl := 0
+var sweeper_head_lvl := 0
 var sweeper_energy := 12.0
 var charger_energy := CHARGER_BATT
 var vehicles := {}  # name -> [x, y, z, heading] last parked position
@@ -262,6 +265,14 @@ func boots_mult() -> float:
 	return BOOTS[boots_lvl].mult
 
 
+func hopper_capacity() -> float:
+	return SWEEPER_HOPPERS[hopper_lvl].kg
+
+
+func sweeper_width() -> float:
+	return SWEEPER_HEADS[sweeper_head_lvl].width
+
+
 func sweeper_battery() -> float:
 	return SWEEPER_BATT[sweeper_batt_lvl].kwh
 
@@ -342,7 +353,7 @@ func to_dict() -> Dictionary:
 	return {
 		credits = credits, tank = tank, hopper = hopper, tool_lvl = tool_lvl, mods = mods,
 		tank_lvl = tank_lvl, boots_lvl = boots_lvl, drones = drones, panels = panels, bank = bank,
-		sweeper_owned = sweeper_owned, charger_owned = charger_owned, sweeper_batt_lvl = sweeper_batt_lvl,
+		sweeper_owned = sweeper_owned, charger_owned = charger_owned, sweeper_batt_lvl = sweeper_batt_lvl, hopper_lvl = hopper_lvl, sweeper_head_lvl = sweeper_head_lvl,
 		sweeper_energy = sweeper_energy, charger_energy = charger_energy, vehicles = vehicles,
 		total_sold = total_sold, hexes_cleared = hexes_cleared, drone_range = drone_range,
 		collected = collected, earned = earned, missions_done = missions_done, story_seen = story_seen,
@@ -370,6 +381,8 @@ func from_dict(d: Dictionary) -> void:
 	sweeper_owned = d.get("sweeper_owned", false)
 	charger_owned = d.get("charger_owned", false)
 	sweeper_batt_lvl = clampi(int(d.get("sweeper_batt_lvl", 0)), 0, SWEEPER_BATT.size() - 1)
+	hopper_lvl = clampi(int(d.get("hopper_lvl", 0)), 0, SWEEPER_HOPPERS.size() - 1)
+	sweeper_head_lvl = clampi(int(d.get("sweeper_head_lvl", 0)), 0, SWEEPER_HEADS.size() - 1)
 	sweeper_energy = d.get("sweeper_energy", sweeper_battery())
 	charger_energy = d.get("charger_energy", CHARGER_BATT)
 	vehicles = d.get("vehicles", {})

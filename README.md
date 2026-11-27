@@ -56,6 +56,12 @@ sells for rupees. You are the last contractor on the payroll, with a scrub brush
   world). Slower driving uses less battery per km (power grows with the square of speed and the
   brush works on the ground it covers), so the HUD range grows as you scroll down. Shift boosts
   past the limit at a much higher cost per km.
+- **Sweeper upgrades** (Vehicles tab): a **wider brush head** (4.6 → 5.6 → 6.8 → 8.2 m; the roller
+  grows and draws power in proportion), a **bigger hopper** (900 → 1,400 → 2,000 → 3,000 kg) and a
+  bigger battery pack.
+- **Leave a vehicle anywhere:** step out and it sets its parking brake and stays put, however far
+  you walk away. (Vehicles used to fall through the ground once you were out of range; one found
+  under the ground in an older save is lifted back on top.)
 - **Wear and tear:** tyres wear with distance (3x faster when boosting), the brush with sweeping,
   the motor with throttle, boost and crashes. Worn parts cost grip, speed, cleaning power and
   battery; a failed motor stops the vehicle. Grime builds up and a dying motor smokes. Repair parts

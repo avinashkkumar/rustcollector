@@ -135,6 +135,7 @@ func _make_vehicle(kind: String, slot: Vector3) -> Vehicle:
 	if kind == "sweeper":
 		v.battery = state.sweeper_battery()
 		v.energy = minf(state.sweeper_energy, v.battery)
+		v.set_head_width(state.sweeper_width())
 	else:
 		v.battery = GameState.CHARGER_BATT
 		v.energy = state.charger_energy
@@ -1074,7 +1075,7 @@ func player_clean(pos: Vector3, tool: Dictionary, dt: float) -> bool:
 
 
 func vehicle_clean(_v: Vehicle, pos: Vector3, radius: float, strength: float) -> void:
-	if mode == "play" and state.hopper >= GameState.SWEEPER_HOPPER:
+	if mode == "play" and state.hopper >= state.hopper_capacity():
 		_warn("Sweeper hopper full! Press Q at the export depot, or Q anywhere to bag it into a sack.")
 		return
 	var cf := GameState.crust_factor(GameState.SWEEPER_TIER, state.crust_at(pos.x, pos.z))
@@ -1082,7 +1083,7 @@ func vehicle_clean(_v: Vehicle, pos: Vector3, radius: float, strength: float) ->
 		_warn("Crust IV is too hard for the Sweeper's roller. Clean it on foot with a top-tier tool.")
 	var kg := rust.paint(pos, radius, strength * cf)
 	if kg > 0.0:
-		state.hopper = minf(state.hopper + kg, GameState.SWEEPER_HOPPER)
+		state.hopper = minf(state.hopper + kg, state.hopper_capacity())
 		state.collected += kg
 		state.sol_kg.sweeper += kg
 		_dig(kg)
@@ -1358,18 +1359,18 @@ func _take_sack(i: int) -> void:
 ## The Sweeper's brush scoops up any sack it drives over, as far as the hopper has room.
 ## Lifting takes time: park over the sack (or crawl across it) until it is gone.
 func _sweeper_scoop(dt: float) -> void:
-	if driven() != sweeper or not sweeper.tool_on or state.hopper >= GameState.SWEEPER_HOPPER - 0.5:
+	if driven() != sweeper or not sweeper.tool_on or state.hopper >= state.hopper_capacity() - 0.5:
 		return
 	var front := sweeper.global_position + sweeper.forward() * 1.2
 	var i := sack_near(front, SACK_SCOOP)
 	if i < 0:
 		return
 	var last := float(state.sacks[i][3]) <= SCOOP_RATE * dt
-	var got := take_from_sack(i, minf(SCOOP_RATE * dt, GameState.SWEEPER_HOPPER - state.hopper))
+	var got := take_from_sack(i, minf(SCOOP_RATE * dt, state.hopper_capacity() - state.hopper))
 	state.hopper += got
 	_pouring = true
 	if last:
-		hud.toast("Scooped up the sack (hopper %.0f / %.0f kg)." % [state.hopper, GameState.SWEEPER_HOPPER], 2.0)
+		hud.toast("Scooped up the sack (hopper %.0f / %.0f kg)." % [state.hopper, state.hopper_capacity()], 2.0)
 		sfx("latch")
 
 
@@ -1913,6 +1914,10 @@ func _base_price(item: String) -> int:
 			return GameState.SWEEPER_COST if not state.sweeper_owned else -1
 		"charger":
 			return GameState.CHARGER_COST if not state.charger_owned else -1
+		"sweeper_head":
+			return GameState.SWEEPER_HEADS[state.sweeper_head_lvl + 1].cost if state.sweeper_owned and state.sweeper_head_lvl < GameState.SWEEPER_HEADS.size() - 1 else -1
+		"sweeper_hopper":
+			return GameState.SWEEPER_HOPPERS[state.hopper_lvl + 1].cost if state.sweeper_owned and state.hopper_lvl < GameState.SWEEPER_HOPPERS.size() - 1 else -1
 		"sweeper_batt":
 			return GameState.SWEEPER_BATT[state.sweeper_batt_lvl + 1].cost if state.sweeper_owned and state.sweeper_batt_lvl < GameState.SWEEPER_BATT.size() - 1 else -1
 		"drone":
@@ -1983,6 +1988,13 @@ func buy(item: String) -> bool:
 		"sweeper_batt":
 			state.sweeper_batt_lvl += 1
 			sweeper.battery = state.sweeper_battery()
+		"sweeper_head":
+			state.sweeper_head_lvl += 1
+			sweeper.set_head_width(state.sweeper_width())
+			hud.toast("Fitted a %.1f m brush head to the Sweeper." % state.sweeper_width(), 3.0)
+		"sweeper_hopper":
+			state.hopper_lvl += 1
+			hud.toast("The Sweeper's hopper now holds %.0f kg." % state.hopper_capacity(), 3.0)
 		"drone":
 			spawn_drone(state.drones)
 			state.drones += 1

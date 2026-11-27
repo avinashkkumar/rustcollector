@@ -314,8 +314,8 @@ func _update_text() -> void:
 	var r := s.rank_index()
 	rank_lbl.text = "%s%s" % [s.rank_name(), "" if r == 0 else "  ·  exports +%d%%" % roundi(r * GameState.RANK_BONUS * 100.0)]
 	if v == world.sweeper:
-		load_lbl.text = "Hopper %.0f / %.0f kg · brush %s" % [s.hopper, GameState.SWEEPER_HOPPER, "on" if v.tool_on else "off"]
-		load_bar.max_value = GameState.SWEEPER_HOPPER
+		load_lbl.text = "Hopper %.0f / %.0f kg · brush %s" % [s.hopper, s.hopper_capacity(), "on" if v.tool_on else "off"]
+		load_bar.max_value = s.hopper_capacity()
 		load_bar.value = s.hopper
 	else:
 		load_lbl.text = "Rust tank %.1f / %.0f kg" % [s.tank, s.capacity()]
@@ -478,11 +478,17 @@ func _refresh_shop() -> void:
 			_row("Solar panel  (%d/%d installed)" % [s.panels, GameState.MAX_PANELS],
 				"+%.0f kW generation and +%.0f kWh of base battery. Vehicles charge from it at the garage posts." % [GameState.PANEL_KW, GameState.BANK_PER_PANEL], "panel")
 		"Vehicles":
-			_row("Sweeper", "Drivable 4.6 m roller brush with a %.0f kg hopper. Handles up to Crust III. Runs on battery." % GameState.SWEEPER_HOPPER, "sweeper")
+			_row("Sweeper", "Drivable %.1f m roller brush with a %.0f kg hopper. Handles up to Crust III. Runs on battery." % [s.sweeper_width(), s.hopper_capacity()], "sweeper")
 			if s.sweeper_owned:
 				var nlv := s.sweeper_batt_lvl + 1
 				_row("Sweeper battery pack", "Capacity %.0f kWh%s." % [s.sweeper_battery(),
 					(" -> %.0f kWh" % GameState.SWEEPER_BATT[nlv].kwh) if nlv < GameState.SWEEPER_BATT.size() else " (max)"], "sweeper_batt")
+				var hl := s.sweeper_head_lvl + 1
+				_row("Wider brush head", "Roller swath %.1f m%s. Sweeps more per pass; the brush draws power in proportion." % [s.sweeper_width(),
+					(" -> %.1f m" % GameState.SWEEPER_HEADS[hl].width) if hl < GameState.SWEEPER_HEADS.size() else " (max)"], "sweeper_head")
+				var pl := s.hopper_lvl + 1
+				_row("Bigger hopper", "Holds %.0f kg%s before you have to unload." % [s.hopper_capacity(),
+					(" -> %.0f kg" % GameState.SWEEPER_HOPPERS[pl].kg) if pl < GameState.SWEEPER_HOPPERS.size() else " (max)"], "sweeper_hopper")
 			_row("Charger cart", "Mobile %.0f kWh battery. Park it next to a stranded Sweeper and connect its cable." % GameState.CHARGER_BATT, "charger")
 			if s.sweeper_owned:
 				_row("Tow sweeper to the garage", "Recover a stranded sweeper to its garage bay.", "tow_sweeper")
